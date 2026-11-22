@@ -49,9 +49,10 @@ jobs:
             -project XiaoHaCar.xcodeproj \
             -scheme XiaoHaCar
 
-      # TrollStore 需要"已签名"的 ipa：它接受 ad-hoc（伪签名），不接受完全未签名。
-      # 不提供证书即可，不涉及任何开发者账号。
-      - name: 编译并归档（ad-hoc 签名）
+      # Xcode 16 不允许对 iOS SDK 目标直接 ad-hoc 签名（"Ad Hoc code signing is
+      # not allowed with SDK 'iOS 18.0'"）。正确做法：先不签名编译，再离线 codesign -s -。
+      # 这也是 TrollStore 的常规流程。
+      - name: 编译并归档（不签名）
         run: |
           set -euo pipefail
           xcodebuild archive \
@@ -60,23 +61,20 @@ jobs:
             -configuration Release \
             -destination "generic/platform=iOS" \
             -archivePath build/XiaoHaCar.xcarchive \
-            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=YES \
-            CODE_SIGN_STYLE=Manual \
-            DEVELOPMENT_TEAM="" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            ENABLE_USER_SCRIPT_SANDBOXING=NO \
-            OTHER_CODE_SIGN_FLAGS="--force --deep"
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_ENTITLEMENTS="" \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO
 
-      - name: 确保扩展与主 App 都是 ad-hoc 签名
+      - name: 离线 ad-hoc 签名
         run: |
           set -euo pipefail
           APPS_DIR="build/XiaoHaCar.xcarchive/Products/Applications"
           APP_PATH="$(find "$APPS_DIR" -maxdepth 1 -name '*.app' | head -1)"
           echo "APP_PATH=$APP_PATH"
-          # 先签内嵌扩展，再签主 App（顺序不能反）
-          find "$APP_PATH" -name "*.appex" -maxdepth 3 | while read -r appex; do
+          # 先签内嵌扩展，再签主 App，顺序不能反
+          find "$APP_PATH" -name "*.appex" -maxdepth 3 -print0 | while IFS= read -r -d '' appex; do
             echo "codesign appex: $appex"
             codesign --force --sign - --timestamp=none "$appex"
           done
