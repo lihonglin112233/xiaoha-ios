@@ -1,0 +1,80 @@
+## actemp_divided
+acTempSet=22.5
+## actemp_out_of_range
+## door_case_mismatch
+doorFrontRight=true
+doorRearLeft=false
+doorRearRight=false
+doorTrunk=true
+## empty
+## full
+acAutoMode=true
+acTempSet=24.5
+acquisitionTime=2026-11-22 21:00:00
+airConditioner=true
+antitheft=true
+avgEnergyConsumption=13.4
+avgFuelConsumption=7.8
+batteryPercent=62
+batteryVoltage=12.4
+cabinClean=false
+cabinTemp=22.5
+doorFrontLeft=false
+doorFrontRight=true
+doorRearLeft=false
+doorRearRight=false
+doorTrunk=false
+doorsLocked=false
+engineState=2
+evRange=310
+frontDefroster=true
+fuelGauge=58
+fuelRange=380
+fuelVolume=42.5
+gear=P
+gpsSwitchOn=1
+highBeam=false
+hood=false
+lowBeam=true
+mileage=12345.6
+oilAlarm=false
+powerState=1
+rearDefroster=false
+seatHeatDriver=true
+seatHeatPassenger=false
+seatHeatRearLeft=false
+seatHeatRearRight=false
+seatVentDriver=false
+seatVentPassenger=false
+steerWheelHeat=true
+sunroof=false
+tboxStatus=1
+tireAlarmFl=true
+tireAlarmFr=false
+tireAlarmRl=false
+tireAlarmRr=false
+tirePressureFl=2.4
+tirePressureFr=2.3
+tirePressureRl=2.2
+tirePressureRr=2.5
+tireTempFl=31
+tireTempFr=29
+tireTempRl=28
+tireTempRr=30
+windowFrontLeft=false
+windowFrontRight=true
+windowRearLeft=false
+windowRearRight=false
+windshieldHeat=true
+## rootonly
+acquisitionTime=t1
+engineState=0
+fuelGauge=10
+gpsSwitchOn=1
+tboxStatus=9
+## values_edge
+engineState=1
+mileage=88.25
+## windows_partial
+windowFrontLeft=false
+windowFrontRight=false

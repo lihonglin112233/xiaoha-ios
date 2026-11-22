@@ -1,0 +1,18 @@
+md5Hex	2858b657af3bae8c9d60b4bba3ae4044
+sha256Hex	57c00a3c752d44db5516f5bf75d62e8b222921bf921e5a3abaa1d5de62255ae2
+autoAiSign	XbRRWJTGh6ymTCbIetoWyFau7ws=
+beanTechSign1	b1190523fac076fce3dadef78a0d0d4e41491d433f3f43716613bdd9f93f4ab2
+beanTechSign2	20720c563b8c3c2ff8d24e729b737a36f2b41313a78f911fd08de6761caaf2f1
+defaultSignPost	a259d417da51a21694e00bc333fea72fb2c888e816b91743e31bc1b3c28dc090
+defaultSignGet	e6ad9d697036261beadb5aa0f6096cda8f756696ce97ec5733cf1b1981945c18
+encEnvelope1	G_A(U2FsdGVkX18BAgMEBQYHCLhDUC3rhoRsb0yA73gNyHloS4BD0mNG/ZCvAw0/bcsm,1)
+encEnvelope2	G_A(U2FsdGVkX18JCAcGBQQDAheynyza11+VrQixOfGUwYo=,2)
+decRoundTrip	{"k":"v","n":1}
+dotnetJson	{"z":{"b":1,"a":"x\u003Cy\u0026z\u0027q\u0022w","c":null,"d":true,"e":12.5,"f":"\u0001\u007F\u4E2D","g":[3,"t",null]},"num":7}
+urlEncode	a+b%2Bc*d%7Ee%2Ff%3Fg%3Dh%26i%3Dj%E4%B8%AD%E6%96%87
+toHexUpper	DEAD0FFF
+deriveSecret0	E3*138%pb=GcflmhmsaA4WU^J-f&0Ofe-Ery-9B2C4D5rer ab
+deriveSecret1	E3*138%pb=GcflmhmsaA4WU^J-f&0OfeE5mpCO2C4D5Erer ab
+deriveSecret2	E3*138%pb=GcflmhmsaA4WU^J-f&0Ofery-9A5
+deriveSecret3	E3*138%pb=GcflmhmsaA4WU^J-f&0Ofet8X_MyZZZZZZ
+deriveSecret4	E3*138%pb=GcflmhmsaA4WU^J-f&0OfeKgAGpX345678

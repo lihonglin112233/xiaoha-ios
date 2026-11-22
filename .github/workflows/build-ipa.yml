@@ -1,0 +1,115 @@
+name: build-ipa
+
+# 在 macOS runner 上编译出未签名 .ipa，用于 Sideloadly / AltStore 自签安装。
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["*.md"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      unsigned_only:
+        description: "只出未签名 ipa（自签安装用）"
+        type: boolean
+        default: true
+
+jobs:
+  test:
+    name: 单元测试（Linux，零依赖核心层）
+    runs-on: ubuntu-24.04
+    container: swift:6.0-noble
+    steps:
+      - uses: actions/checkout@v4
+      - name: 跑核心层测试
+        run: swift test
+
+  build:
+    name: 编译 ipa
+    needs: test
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 选择 Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.0.app || sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        run: xcodegen generate
+
+      - name: 解析 Swift Package 依赖
+        run: |
+          set -euo pipefail
+          xcodebuild -resolvePackageDependencies \
+            -project XiaoHaCar.xcodeproj \
+            -scheme XiaoHaCar
+
+      # TrollStore 需要"已签名"的 ipa：它接受 ad-hoc（伪签名），不接受完全未签名。
+      # 不提供证书即可，不涉及任何开发者账号。
+      - name: 编译并归档（ad-hoc 签名）
+        run: |
+          set -euo pipefail
+          xcodebuild archive \
+            -project XiaoHaCar.xcodeproj \
+            -scheme XiaoHaCar \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath build/XiaoHaCar.xcarchive \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
+            OTHER_CODE_SIGN_FLAGS="--force --deep"
+
+      - name: 确保扩展与主 App 都是 ad-hoc 签名
+        run: |
+          set -euo pipefail
+          APPS_DIR="build/XiaoHaCar.xcarchive/Products/Applications"
+          APP_PATH="$(find "$APPS_DIR" -maxdepth 1 -name '*.app' | head -1)"
+          echo "APP_PATH=$APP_PATH"
+          # 先签内嵌扩展，再签主 App（顺序不能反）
+          find "$APP_PATH" -name "*.appex" -maxdepth 3 | while read -r appex; do
+            echo "codesign appex: $appex"
+            codesign --force --sign - --timestamp=none "$appex"
+          done
+          echo "codesign app: $APP_PATH"
+          codesign --force --sign - --timestamp=none "$APP_PATH"
+          echo "--- 校验 ---"
+          codesign -dv --verbose=2 "$APP_PATH" 2>&1 | head -12
+          codesign --verify --deep --strict "$APP_PATH" && echo "verify OK"
+
+      - name: 打包成 ipa
+        run: |
+          set -euo pipefail
+          APPS_DIR="build/XiaoHaCar.xcarchive/Products/Applications"
+          APP_PATH="$(find "$APPS_DIR" -maxdepth 1 -name '*.app' | head -1)"
+          mkdir -p build/Payload
+          cp -R "$APP_PATH" build/Payload/
+          cd build
+          rm -f XiaoHaCar.ipa
+          zip -qry XiaoHaCar.ipa Payload
+          ls -lh XiaoHaCar.ipa
+          shasum -a 256 XiaoHaCar.ipa
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: XiaoHaCar-ipa
+          path: build/XiaoHaCar.ipa
+          retention-days: 30
+
+      - name: 归档 dSYM（便于定位崩溃）
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: dSYM
+          path: build/XiaoHaCar.xcarchive/dSYMs
+          retention-days: 7
