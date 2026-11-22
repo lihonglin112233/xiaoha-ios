@@ -130,7 +130,7 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
             repository.lastUpdateAt,
             repository.lastVehicles ?? [],
             repository.isPollEnabled,
-            repository.sessionMessage()
+            repository.sessionMessage
         )
         onMain { [weak self] in
             guard let self else { return }
@@ -257,6 +257,14 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
     func clearUnread() {
         alertCenter.clearUnread()
         onMain { [weak self] in self?.unread = 0 }
+    }
+
+    func clearAlerts() {
+        alertCenter.clearUnread()
+        onMain { [weak self] in
+            self?.alerts.removeAll()
+            self?.unread = 0
+        }
     }
 }
 

@@ -466,8 +466,7 @@ struct ControlView: View {
                                 .font(.subheadline.bold())
                             Spacer()
                             Button("清空") {
-                                env.alerts.removeAll()
-                                env.clearUnread()
+                                env.clearAlerts()
                             }
                             .font(.caption)
                         }
