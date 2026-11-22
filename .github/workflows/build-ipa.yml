@@ -59,13 +59,15 @@ jobs:
             -project XiaoHaCar.xcodeproj \
             -scheme XiaoHaCar \
             -configuration Release \
+            -sdk iphoneos \
             -destination "generic/platform=iOS" \
             -archivePath build/XiaoHaCar.xcarchive \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_ENTITLEMENTS="" \
-            ENABLE_USER_SCRIPT_SANDBOXING=NO
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
+            ONLY_ACTIVE_ARCH=NO
 
       - name: 离线 ad-hoc 签名
         run: |
