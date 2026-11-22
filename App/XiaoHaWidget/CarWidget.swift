@@ -57,16 +57,30 @@ struct CarWidgetView: View {
             .foregroundStyle(.secondary)
         }
         .padding(12)
-        .containerBackground(for: .widget) {
-            LinearGradient(colors: [Color(.systemBackground), Color.accentColor.opacity(0.08)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-        }
+        .modifier(WidgetBackground())
     }
 
     private func metric(_ title: String, _ value: String, tint: Color) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(title).font(.system(size: 9)).foregroundStyle(.secondary)
             Text(value).font(.caption.bold().monospacedDigit()).foregroundStyle(tint)
+        }
+    }
+}
+
+/// containerBackground 是 iOS 17 API；iOS 16 退回普通 background。
+struct WidgetBackground: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 17.0, *) {
+            content.containerBackground(for: .widget) {
+                LinearGradient(colors: [Color(.systemBackground), Color.accentColor.opacity(0.08)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            }
+        } else {
+            content.background(
+                LinearGradient(colors: [Color(.systemBackground), Color.accentColor.opacity(0.08)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            )
         }
     }
 }
