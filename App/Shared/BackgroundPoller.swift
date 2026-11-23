@@ -24,17 +24,37 @@ final class BackgroundPoller {
     }
 
     /// 回到前台时启动短周期定时器，退到后台后转交 BGTask。
+    /// Timer 必须在有 RunLoop 的线程创建，否则 scheduledTimer 会直接崩溃。
+    /// 这里统一收敛到主线程，并且每次重建都先失效旧 Timer。
     func startForegroundPolling(interval: TimeInterval = 60) {
-        guard foregroundTimer == nil else { return }
-        foregroundTimer = Timer.scheduledTimer(withTimeInterval: max(30, interval), repeats: true) { _ in
-            AppEnvironment.shared.repository.refreshNow()
+        let start = { [weak self] in
+            guard let self, self.foregroundTimer == nil else { return }
+            let timer = Timer(timeInterval: max(30, interval), repeats: true) { _ in
+                AppEnvironment.shared.repository.refreshNow()
+            }
+            // .common 保证滚动时也继续计时
+            RunLoop.main.add(timer, forMode: .common)
+            self.foregroundTimer = timer
+        }
+        if Thread.isMainThread {
+            start()
+        } else {
+            DispatchQueue.main.async(execute: start)
         }
     }
 
     /// 间隔变更时重启定时器，立即生效。
     func restartTimer(interval: TimeInterval) {
-        stopForegroundPolling()
-        startForegroundPolling(interval: interval)
+        let restart = { [weak self] in
+            guard let self else { return }
+            self.stopForegroundPolling()
+            self.startForegroundPolling(interval: interval)
+        }
+        if Thread.isMainThread {
+            restart()
+        } else {
+            DispatchQueue.main.async(execute: restart)
+        }
     }
 
     func stopForegroundPolling() {

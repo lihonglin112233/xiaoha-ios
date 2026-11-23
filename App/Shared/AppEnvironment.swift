@@ -380,8 +380,21 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
             lines.append("尚无车况")
         }
         lines.append("")
+        let rawText = raw ?? repository.lastRawStatus
+        if let rawText, let parsed = JSONParser.parse(rawText) {
+            let paths = VehicleStatus.keyPaths(parsed)
+            // 只列出疑似坐标/时间相关路径，避免刷屏
+            let interesting = paths.filter { path in
+                let lower = path.lowercased()
+                return lower.contains("lat") || lower.contains("lon") || lower.contains("lng")
+                    || lower.contains("gps") || lower.contains("posit") || lower.contains("time")
+            }
+            lines.append("=== 疑似坐标/时间字段（共 \(paths.count) 个键）===")
+            lines.append(interesting.isEmpty ? "（未发现任何坐标类字段）" : interesting.joined(separator: "\n"))
+            lines.append("")
+        }
         lines.append("=== 云端原始报文 ===")
-        lines.append(raw ?? repository.lastRawStatus ?? "（拉取失败或尚未拉取）")
+        lines.append(rawText ?? "（拉取失败或尚未拉取）")
         return lines.joined(separator: "\n")
     }
 

@@ -235,6 +235,25 @@ public struct VehicleStatus: Equatable, Sendable {
         }
     }
 
+    /// 列出报文里所有 key 的路径（用于诊断"云端到底有没有坐标字段"）。
+    public static func keyPaths(_ root: JSONValue, limit: Int = 400) -> [String] {
+        var out: [String] = []
+        func walk(_ node: JSONValue, _ prefix: String) {
+            guard out.count < limit else { return }
+            if let pairs = node.asObject {
+                for (key, value) in pairs {
+                    let path = prefix.isEmpty ? key : prefix + "." + key
+                    out.append(path)
+                    walk(value, path)
+                }
+            } else if let items = node.asArray, let firstItem = items.first {
+                walk(firstItem, prefix + "[]")
+            }
+        }
+        walk(root, "")
+        return out
+    }
+
     // MARK: - 定位提取
 
     static func normalizeKey(_ key: String) -> String {

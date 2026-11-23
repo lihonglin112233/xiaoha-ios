@@ -129,8 +129,10 @@ struct ControlView: View {
                 } label: {
                     Image(systemName: "doc.on.doc").font(.caption2)
                 }
-                Link(destination: URL(string: "http://maps.apple.com/?ll=\(lat),\(lon)&q=车辆位置")!) {
-                    Image(systemName: "map").font(.caption2)
+                if let mapURL = Self.mapURL(lat: lat, lon: lon) {
+                    Link(destination: mapURL) {
+                        Image(systemName: "map").font(.caption2)
+                    }
                 }
             } else {
                 Text(env.locationStatusText)
@@ -139,6 +141,26 @@ struct ControlView: View {
                 Spacer()
             }
         }
+    }
+
+    /// 间隔文案：秒 / 分钟 / 小时。
+    static func intervalLabel(_ seconds: Int) -> String {
+        if seconds < 60 { return "\(seconds) 秒" }
+        if seconds < 3600 { return "\(seconds / 60) 分钟" }
+        let hours = seconds / 3600
+        return "\(hours) 小时"
+    }
+
+    /// 安全构造地图链接：坐标非法时返回 nil，避免强制解包崩溃。
+    static func mapURL(lat: Double, lon: Double) -> URL? {
+        guard lat.isFinite, lon.isFinite,
+              abs(lat) <= 90, abs(lon) <= 180 else { return nil }
+        var components = URLComponents(string: "http://maps.apple.com/")
+        components?.queryItems = [
+            URLQueryItem(name: "ll", value: String(format: "%.6f,%.6f", lat, lon)),
+            URLQueryItem(name: "q", value: "车辆位置"),
+        ]
+        return components?.url
     }
 
     private var refreshText: String {
@@ -481,11 +503,8 @@ struct ControlView: View {
                         get: { env.refreshIntervalSeconds },
                         set: { env.refreshIntervalSeconds = $0 }
                     )) {
-                        ForEach([30, 60, 120, 300, 600, 1800, 3600], id: \.self) { seconds in
-                            Text(seconds < 60 ? "\(seconds) 秒"
-                                 : seconds < 3600 ? "\(seconds / 60) 分钟"
-                                 : "\(seconds / 3600) 小时")
-                                .tag(seconds)
+                        ForEach([30, 60, 120, 300, 600, 1800, 3600, 21600, 43200], id: \.self) { seconds in
+                            Text(Self.intervalLabel(seconds)).tag(seconds)
                         }
                     }
                     .pickerStyle(.menu)

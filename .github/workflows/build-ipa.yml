@@ -31,10 +31,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 选择 Xcode
+      - name: 选择 Xcode 并确保 iOS 平台可用
         run: |
-          sudo xcode-select -s /Applications/Xcode_16.0.app || sudo xcode-select -s /Applications/Xcode.app
+          set -euo pipefail
+          # 优先挑一个确实装了 iOS SDK 的 Xcode 版本
+          for candidate in /Applications/Xcode_16.2.app /Applications/Xcode_16.1.app \
+                           /Applications/Xcode_16.0.app /Applications/Xcode.app; do
+            if [ -d "$candidate" ]; then
+              sudo xcode-select -s "$candidate"
+              echo "selected: $candidate"
+              break
+            fi
+          done
           xcodebuild -version
+          echo "--- 已安装的 SDK ---"
+          xcodebuild -showsdks | sed -n '1,40p' || true
+          # 若 iphoneos SDK 缺失，显式安装当前 Xcode 对应平台
+          if ! xcodebuild -showsdks | grep -q "iphoneos"; then
+            echo "iphoneos SDK 缺失，尝试安装 iOS 平台组件"
+            sudo xcodebuild -runFirstLaunch || true
+            xcrun simctl list runtimes >/dev/null 2>&1 || true
+          fi
 
       - name: 安装 XcodeGen
         run: brew install xcodegen
