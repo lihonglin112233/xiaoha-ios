@@ -161,6 +161,74 @@ final class CommandExecutorTests: XCTestCase {
         XCTAssertTrue(result?.message.hasPrefix("锁车成功") == true, result?.message ?? "")
     }
 
+    /// 并发下发必须被拒绝，避免"上一条指令的校验结果覆盖当前提示"
+    /// （这正是用户看到"点解锁却显示闪灯"的成因）。
+    func testConcurrentRunIsRejected() async throws {
+        let transport = StubTransport()
+        transport.on(path: "getLastStatus") { _ in
+            json("{\"code\":\"0\",\"data\":{\"vehicleStatusInfo\":{\"esclLockSts\":\"1\"}}}")
+        }
+        transport.on(path: "/tsp/ead") { _ in
+            json("{\"header\":{\"c\":\"0\"},\"body\":{\"transactionId\":\"TX\"}}")
+        }
+        var before = VehicleStatus()
+        before.doorsLocked = false
+        let (repo, _) = makeRepository(transport)
+        repo.setCurrentStatus(before)
+
+        // 校验窗口拉长，保证第一条还在跑
+        let slow = CommandExecutor.Timing(verifyInterval: 0.2, verifyTimeout: 5,
+                                          stepGapOnSuccess: 0.01, stepGapOnFailure: 0.01)
+        let executor = CommandExecutor(repository: repo, timing: slow)
+        XCTAssertFalse(executor.isRunning)
+
+        let first = expectation(description: "first")
+        var firstResult: CommandExecutor.Result?
+        executor.run(.lock) { r in
+            firstResult = r
+            first.fulfill()
+        }
+
+        // 立刻并发第二条
+        let second = expectation(description: "second")
+        var secondResult: CommandExecutor.Result?
+        executor.run(.flash) { r in
+            secondResult = r
+            second.fulfill()
+        }
+        await fulfillment(of: [second], timeout: 5)
+        XCTAssertEqual(secondResult?.success, false)
+        XCTAssertEqual(secondResult?.message, "上一条指令还在执行，请稍候再试")
+        XCTAssertNotEqual(secondResult?.runId, firstResult?.runId)
+
+        await fulfillment(of: [first], timeout: 10)
+        // 第一条跑完后应释放，允许后续指令
+        XCTAssertFalse(executor.isRunning)
+    }
+
+    /// 结果必须带上真实下发的 controlType，界面据此自证没有串指令。
+    func testResultCarriesDispatchedControlType() async throws {
+        let transport = StubTransport()
+        transport.on(path: "getLastStatus") { _ in
+            json("{\"code\":\"0\",\"data\":{\"vehicleStatusInfo\":{\"esclLockSts\":\"1\"}}}")
+        }
+        transport.on(path: "/tsp/ead") { _ in
+            json("{\"header\":{\"c\":\"0\"},\"body\":{\"transactionId\":\"TX\"}}")
+        }
+        let (repo, _) = makeRepository(transport)
+        let executor = CommandExecutor(repository: repo, timing: fastTiming())
+
+        let exp = expectation(description: "done")
+        var result: CommandExecutor.Result?
+        executor.run(.unlock) { r in
+            result = r
+            exp.fulfill()
+        }
+        await fulfillment(of: [exp], timeout: 10)
+        XCTAssertEqual(result?.controlType, "VEHICLE_UNLOCK")
+        XCTAssertEqual(executor.dispatchedControlTypes.first, "VEHICLE_UNLOCK")
+    }
+
     /// 车况始终没变化 → 超时后报未生效。
     func testTimeoutReportsNotEffective() async throws {
         var before = VehicleStatus()

@@ -73,6 +73,21 @@ public final class GwmClient: @unchecked Sendable {
 
     private var platformCache: [String: String] = [:]
     private var t5BrokenVins: Set<String> = []
+    /// gtsp/AutoAI 通道的空调策略。
+    ///
+    /// 原 APK 在 AutoAI 通道使用 cmdCode 6/7 并配合 SET_AND_OPEN_COMMAND；
+    /// 社区实现（chaosl1996/gwm_cn_ha）指出 gtsp 平台并无空调专用码，
+    /// 改用远程启动/熄火（15/16）。两者冲突，默认保留原 APK 行为，
+    /// 若实测 6/7 无响应可切换到 .engineFallback。
+    public enum HvacStrategy: String, Sendable {
+        /// 原 APK：cmdCode 6/7 + SET_AND_OPEN_COMMAND + airParams
+        case dedicatedCodes
+        /// 社区实测：开=ENGINE_START(15)、关=ENGINE_STOP(16)
+        case engineFallback
+    }
+
+    public var hvacStrategy: HvacStrategy = .dedicatedCodes
+
     private var timeoutSeconds: TimeInterval = 20
     private let transport: HTTPTransport
     private let lock = NSRecursiveLock()
@@ -579,26 +594,39 @@ public final class GwmClient: @unchecked Sendable {
         }
 
         var code = GwmCommand.autoAiCodes[controlType]
-        if controlType == GwmCommand.acStart {
-            code = 6
-        } else if controlType == GwmCommand.acStop {
-            code = 7
+        var effectiveControlType = controlType
+        switch hvacStrategy {
+        case .dedicatedCodes:
+            if controlType == GwmCommand.acStart {
+                code = 6
+            } else if controlType == GwmCommand.acStop {
+                code = 7
+            }
+        case .engineFallback:
+            // gtsp 无空调专用码：开空调=远程启动，关空调=远程熄火
+            if controlType == GwmCommand.acStart {
+                code = GwmCommand.autoAiCodes[GwmCommand.engineStart]
+                effectiveControlType = GwmCommand.engineStart
+            } else if controlType == GwmCommand.acStop {
+                code = GwmCommand.autoAiCodes[GwmCommand.engineStop]
+                effectiveControlType = GwmCommand.engineStop
+            }
         }
         guard let code else {
             let platformText = platform.isEmpty ? "未知" : platform
             throw GwmError.auth("平台 \(platformText) 暂不支持该指令：\(controlType)（gtsp 平台支持 锁车/解锁/关全车窗/鸣笛/闪灯/鸣笛闪灯/空调开/空调关/远程启动/熄火/关天窗）")
         }
 
-        let function = (controlType == GwmCommand.engineStart || controlType == GwmCommand.acStart)
-            ? "GW.M.SET_AND_OPEN_COMMAND"
-            : "GW.M.SEND_COMMON_COMMAND"
+        let useOpenCommand = effectiveControlType == GwmCommand.engineStart
+            || (hvacStrategy == .dedicatedCodes && controlType == GwmCommand.acStart)
+        let function = useOpenCommand ? "GW.M.SET_AND_OPEN_COMMAND" : "GW.M.SEND_COMMON_COMMAND"
 
         var extra: JSONValue?
-        if controlType == GwmCommand.engineStart {
+        if effectiveControlType == GwmCommand.engineStart {
             let seconds = body?.value("operationTime")?.asDouble ?? 900
             let minutes = max(1, Int(seconds) / 60)
             extra = .object([("engineParams", .object([("runTime", .int(minutes))]))])
-        } else if controlType == GwmCommand.acStart {
+        } else if hvacStrategy == .dedicatedCodes && controlType == GwmCommand.acStart {
             let operationTime = body?.value("operationTime")?.asDouble ?? Double(TempControl.defaultDurationSeconds)
             var airParams: [(String, JSONValue)] = []
             airParams.append(("runTime", .int(max(1, Int(operationTime) / 60))))

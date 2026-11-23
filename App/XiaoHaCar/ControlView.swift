@@ -490,6 +490,32 @@ struct ControlView: View {
                     .pickerStyle(.menu)
                 }
                 Divider()
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("gtsp 空调指令").font(.subheadline)
+                        Text(env.hvacStrategy == .dedicatedCodes
+                             ? "原版：专用码 6/7"
+                             : "社区实测：远程启动/熄火 15/16")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Picker("空调指令", selection: Binding(
+                        get: { env.hvacStrategy },
+                        set: { env.hvacStrategy = $0 }
+                    )) {
+                        Text("原版 6/7").tag(GwmClient.HvacStrategy.dedicatedCodes)
+                        Text("启动/熄火").tag(GwmClient.HvacStrategy.engineFallback)
+                    }
+                    .pickerStyle(.menu)
+                }
+                Divider()
+                Button {
+                    env.copyRawStatusReport()
+                } label: {
+                    Label("复制原始车况（用于核对定位字段）", systemImage: "doc.text.magnifyingglass")
+                        .font(.caption)
+                }
+                Divider()
                 Toggle(isOn: Binding(
                     get: { env.pollEnabled },
                     set: { env.setPollEnabled($0) }

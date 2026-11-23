@@ -122,6 +122,48 @@ final class ActionMappingTests: XCTestCase {
         XCTAssertNotEqual(unlock.raw, flash.raw)
     }
 
+    /// 两种空调策略下的指令码与 function 必须各自正确。
+    func testHvacStrategyModes() async throws {
+        // 默认：原 APK 的 6/7
+        let defaultCap = try await captureWithStrategy(.acOn, strategy: .dedicatedCodes)
+        XCTAssertEqual(defaultCap.cmdCode, 6, "默认策略开空调应为 cmdCode 6")
+        XCTAssertEqual(defaultCap.fn, "GW.M.SET_AND_OPEN_COMMAND")
+
+        // 社区实测：改用远程启动 15 / 熄火 16
+        let fallbackOn = try await captureWithStrategy(.acOn, strategy: .engineFallback)
+        XCTAssertEqual(fallbackOn.cmdCode, 15, "engineFallback 开空调应映射到 cmdCode 15")
+        XCTAssertEqual(fallbackOn.fn, "GW.M.SET_AND_OPEN_COMMAND")
+        XCTAssertTrue(fallbackOn.raw.contains("engineParams"), "应带 engineParams 而非 airParams")
+
+        let fallbackOff = try await captureWithStrategy(.acOff, strategy: .engineFallback)
+        XCTAssertEqual(fallbackOff.cmdCode, 16, "engineFallback 关空调应映射到 cmdCode 16")
+        XCTAssertEqual(fallbackOff.fn, "GW.M.SEND_COMMON_COMMAND")
+    }
+
+    func captureWithStrategy(_ action: VehicleAction, strategy: GwmClient.HvacStrategy) async throws -> Captured {
+        let transport = StubTransport()
+        transport.on(path: "/tsp/ead") { _ in
+            json("{\"header\":{\"c\":\"0\"},\"body\":{\"transactionId\":\"TX\"}}")
+        }
+        let client = GwmClient(transport: transport)
+        client.phone = "13800000000"
+        client.deviceId = "DEVID"
+        client.gToken = "G"; client.gRefreshToken = "R"; client.userId = "U"
+        client.beanId = "B"; client.btAccessToken = "BT"
+        client.autoTokenId = "AT"; client.autoUserId = "AU"
+        client.rememberPlatform("LSVAA1234567890", platform: "gtsp")
+        client.hvacStrategy = strategy
+        _ = try await client.sendCommand("LSVAA1234567890", action.controlType,
+                                         TempControl.bodiesOf(24, zone: .both))
+        let request = try XCTUnwrap(transport.lastRequest(path: "/tsp/ead"))
+        let decoded = (request.url.components(separatedBy: "?p=").last?.removingPercentEncoding) ?? ""
+        let parsed = JSONParser.parse(decoded)
+        return Captured(action: action, path: "ead", controlType: nil,
+                        cmdCode: parsed?.value("body")?.value("cmdCode")?.asDouble,
+                        fn: parsed?.value("header")?.value("fn")?.asString,
+                        raw: decoded)
+    }
+
     /// 远程启动/空调应使用 SET_AND_OPEN_COMMAND，其余用 SEND_COMMON_COMMAND。
     func testAutoAiFunctionNames() async throws {
         for action in [VehicleAction.engineStart, .acOn, .acTempSet] {
@@ -176,6 +218,38 @@ final class ActionMappingTests: XCTestCase {
                 XCTAssertTrue(cap.raw.contains("engineParams"), "远程启动应带 engineParams")
             }
         }
+    }
+
+    /// 云端字段名不统一时的定位识别（递归语义扫描，不依赖固定键名）。
+    func testLocationFieldNameVariants() {
+        let cases: [(String, Double, Double)] = [
+            ("{\"position\":{\"lat\":\"39.9\",\"lon\":\"116.4\"}}", 39.9, 116.4),
+            ("{\"gpsLat\":\"31.2\",\"gpsLng\":\"121.4\"}", 31.2, 121.4),
+            ("{\"latitude\":\"22.5\",\"longitude\":\"114.0\"}", 22.5, 114.0),
+            ("{\"loc_lat\":\"30.6\",\"loc_lon\":\"104.0\"}", 30.6, 104.0),
+            ("{\"vehicleLatitude\":\"23.1\",\"vehicleLongitude\":\"113.2\"}", 23.1, 113.2),
+            ("{\"a\":{\"b\":{\"lat\":\"39.0\",\"lng\":\"116.0\"}}}", 39.0, 116.0),
+        ]
+        for (json, lat, lon) in cases {
+            let status = VehicleStatus.parse(JSONParser.parse(json))
+            XCTAssertEqual(status.latitude, lat, "lat 识别失败: \(json)")
+            XCTAssertEqual(status.longitude, lon, "lon 识别失败: \(json)")
+            XCTAssertTrue(status.hasCoordinate, "应判定为有坐标: \(json)")
+        }
+    }
+
+    /// 只有经度没有纬度时不应当作有效定位。
+    func testLocationRequiresBoth() {
+        let onlyLon = VehicleStatus.parse(JSONParser.parse("{\"lon\":\"116.4\"}"))
+        XCTAssertFalse(onlyLon.hasCoordinate)
+        // 但单侧值仍被保留，便于诊断
+        XCTAssertEqual(onlyLon.longitude, nil, "不成对时不应单独采信")
+    }
+
+    /// 超出范围的数值不能被当成坐标。
+    func testLocationRangeValidation() {
+        let bad = VehicleStatus.parse(JSONParser.parse("{\"lat\":\"999\",\"lon\":\"116.4\"}"))
+        XCTAssertFalse(bad.hasCoordinate, "纬度 999 非法")
     }
 
     /// 定位字段解析：有坐标时正确、无坐标时如实为 nil。

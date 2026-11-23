@@ -53,6 +53,11 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
         return created
     }
 
+    /// 登录/恢复后把策略应用到当前 client。
+    func applyStrategyToClient() {
+        repository.setHvacStrategy(hvacStrategy)
+    }
+
     var executor: CommandExecutor {
         lock.lock(); defer { lock.unlock() }
         if let existing = _executor { return existing }
@@ -226,6 +231,15 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// gtsp 通道的空调策略（dedicatedCodes=原APK的6/7，engineFallback=远程启动/熄火）
+    var hvacStrategy: GwmClient.HvacStrategy {
+        get { GwmClient.HvacStrategy(rawValue: settings.hvacStrategyRaw) ?? .dedicatedCodes }
+        set {
+            settings.hvacStrategyRaw = newValue.rawValue
+            repository.setHvacStrategy(newValue)
+        }
+    }
+
     func setSelectedVin(_ vin: String) {
         repository.setSelectedVin(vin)
         settings.selectedVin = vin
@@ -253,7 +267,7 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
             self?.onMain {
                 guard let self else { return }
                 self.progressText = nil
-                let wire = self.executor.lastDispatchedControlType.map { " [" + $0 + "]" } ?? ""
+                let wire = result.controlType.map { " [" + $0 + "]" } ?? ""
                 self.banner = Banner(text: result.message + wire,
                                      isError: !result.success && !result.partial)
                 self.alerts.append(.init(item: label, text: result.message, good: result.success))
@@ -282,6 +296,38 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
         onMain { [weak self] in self?.unread = 0 }
     }
 
+    /// 导出云端原始车况报文：用于核对真实字段名（例如定位字段到底叫什么）。
+    /// 会做脱敏：去掉 VIN 之外的个人标识不涉及，但坐标等业务数据保留以便核对。
+    func rawStatusReport() -> String {
+        var lines: [String] = []
+        lines.append("=== 小哈车控 车况诊断 ===")
+        lines.append("时间: " + ISO8601DateFormatter().string(from: Date()))
+        lines.append("已登录: \(isLoggedIn)")
+        lines.append("平台: \(platformForSelectedVehicle())")
+        lines.append("车辆: \(repository.selectedVin() ?? "-")")
+        lines.append("App Group: \(WidgetStore.diagnostics())")
+        lines.append("最近更新: \(lastUpdateAt.map { ISO8601DateFormatter().string(from: $0) } ?? "无")")
+        lines.append("")
+        lines.append("=== 解析后定位 ===")
+        if let status {
+            lines.append("latitude=\(status.latitude.map { String($0) } ?? "nil")")
+            lines.append("longitude=\(status.longitude.map { String($0) } ?? "nil")")
+            lines.append("positionTime=\(status.positionTime ?? "nil")")
+            lines.append("hasCoordinate=\(status.hasCoordinate)")
+        } else {
+            lines.append("尚无车况")
+        }
+        lines.append("")
+        lines.append("=== 云端原始报文 ===")
+        lines.append(repository.lastRawStatus ?? "（尚未拉取）")
+        return lines.joined(separator: "\n")
+    }
+
+    func copyRawStatusReport() {
+        UIPasteboard.general.string = rawStatusReport()
+        banner = Banner(text: "原始车况已复制，可直接粘贴发送", isError: false)
+    }
+
     func clearAlerts() {
         alertCenter.clearUnread()
         onMain { [weak self] in
@@ -307,6 +353,11 @@ final class AppSettings: @unchecked Sendable {
     var pollIntervalSeconds: Int {
         get { defaults.object(forKey: intervalKey) as? Int ?? GwmRepository.defaultInterval }
         set { defaults.set(newValue, forKey: intervalKey) }
+    }
+
+    var hvacStrategyRaw: String {
+        get { defaults.string(forKey: "hvac_strategy") ?? GwmClient.HvacStrategy.dedicatedCodes.rawValue }
+        set { defaults.set(newValue, forKey: "hvac_strategy") }
     }
 
     var remoteEnabled: Bool {

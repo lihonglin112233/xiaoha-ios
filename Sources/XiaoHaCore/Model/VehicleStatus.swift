@@ -102,25 +102,20 @@ public struct VehicleStatus: Equatable, Sendable {
 
         status.acquisitionTime = asString(first(root.value("acquisitiontime"), info.value("acquisitiontime")))
         status.gpsSwitchOn = asString(first(info.value("gpsswitchon"), root.value("gpsswitchon")))
-        // 定位：优先嵌套对象，其次平铺字段；全部走大小写不敏感的常见命名
-        let locationContainer = first(
-            info.value("position"), info.value("location"), info.value("gps"),
-            root.value("position"), root.value("location"), root.value("gps")
-        )
-        status.latitude = Self.parseCoordinate(first(
-            locationContainer?.value("lat"), locationContainer?.value("latitude"),
-            info.value("lat"), info.value("latitude"), root.value("lat"), root.value("latitude")
-        ))
-        status.longitude = Self.parseCoordinate(first(
-            locationContainer?.value("lon"), locationContainer?.value("lng"),
-            locationContainer?.value("longitude"),
-            info.value("lon"), info.value("lng"), info.value("longitude"),
-            root.value("lon"), root.value("lng"), root.value("longitude")
-        ))
-        status.positionTime = asString(first(
-            locationContainer?.value("time"), locationContainer?.value("positiontime"),
-            info.value("positiontime"), root.value("positiontime")
-        ))
+        // 定位：参考 chaosl1996/gwm_cn_ha 的实测路径，云端把经纬度放在
+        // 车况报文顶层（data.latitude / data.longitude）；其余命名再走递归语义扫描。
+        let topLat = Self.parseCoordinate(first(root.value("latitude"), root.value("lat")))
+        let topLon = Self.parseCoordinate(first(root.value("longitude"), root.value("lon"), root.value("lng")))
+        let location: (lat: Double?, lon: Double?, time: String?)
+        if let topLat, let topLon {
+            location = (topLat, topLon,
+                        asString(first(root.value("acquisitiontime"), root.value("acquisitionTime"))))
+        } else {
+            location = Self.extractLocation(root)
+        }
+        status.latitude = location.lat
+        status.longitude = location.lon
+        status.positionTime = location.time
         status.tboxStatus = asString(first(root.value("tboxstatus"), info.value("tboxstate"), info.value("tboxstatus")))
         status.fuelGauge = asString(first(info.value("oilqty"), root.value("oilqty")))
         status.fuelVolume = parseValue(info.value("remainoil"))
@@ -238,6 +233,110 @@ public struct VehicleStatus: Equatable, Sendable {
         default:
             return nil
         }
+    }
+
+    // MARK: - 定位提取
+
+    static func normalizeKey(_ key: String) -> String {
+        key.lowercased()
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: " ", with: "")
+    }
+
+    /// 含 lat/lon 字样但语义无关的键，避免误判。
+    static let excludedLabelKeys: Set<String> = [
+        "platform", "translate", "latest", "relate", "related", "flat", "layout",
+        "plate", "inflate", "lateral", "collate", "template", "violate",
+    ]
+
+    static func isLatitudeKey(_ key: String) -> Bool {
+        let exact: Set<String> = [
+            "lat", "latitude", "gpslat", "gpslatitude", "poslat", "positionlat",
+            "loclat", "locationlat", "vehiclelat", "latval", "latvalue", "latitudevalue",
+        ]
+        if exact.contains(key) { return true }
+        // 允许 "vehicleLat / gpsLat / positionLat" 这类前缀变体。
+        // 不用长度限制（会误伤 vehiclelatitude），改用排除表挡住无关词。
+        if excludedLabelKeys.contains(key) { return false }
+        return key.hasSuffix("latitude") || key.hasSuffix("lat")
+    }
+
+    static func isLongitudeKey(_ key: String) -> Bool {
+        let exact: Set<String> = [
+            "lon", "lng", "long", "longitude", "gpslon", "gpslng", "gpslongitude",
+            "poslon", "poslng", "positionlon", "loclon", "locationlon",
+            "vehiclelon", "lonval", "lonvalue", "lngval", "longitudevalue",
+        ]
+        if exact.contains(key) { return true }
+        if excludedLabelKeys.contains(key) { return false }
+        return key.hasSuffix("longitude") || key.hasSuffix("lon")
+            || key.hasSuffix("lng") || key.hasSuffix("long")
+    }
+
+    static func isPositionTimeKey(_ key: String) -> Bool {
+        let exact: Set<String> = [
+            "positiontime", "postime", "gpstime", "locationtime", "loctime",
+            "reporttime", "updatetime", "acquisitiontime", "timestamp", "time",
+        ]
+        return exact.contains(key)
+    }
+
+    /// 递归扫描报文，找出最可信的一组经纬度。
+    /// 同一对象内同时含经纬度的优先级最高；数值会做范围校验。
+    static func extractLocation(_ root: JSONValue) -> (lat: Double?, lon: Double?, time: String?) {
+        var bestLat: Double?
+        var bestLon: Double?
+        var bestTime: String?
+        var bestScore = -1
+
+        func validLat(_ value: JSONValue?) -> Double? {
+            guard let raw = parseCoordinate(value), abs(raw) <= 90 else { return nil }
+            return raw
+        }
+        func validLon(_ value: JSONValue?) -> Double? {
+            guard let raw = parseCoordinate(value), abs(raw) <= 180 else { return nil }
+            return raw
+        }
+
+        func visit(_ node: JSONValue) {
+            if let pairs = node.asObject {
+                var lat: Double?
+                var lon: Double?
+                var time: String?
+                for (key, value) in pairs {
+                    let k = normalizeKey(key)
+                    if lat == nil, isLatitudeKey(k) { lat = validLat(value) }
+                    if lon == nil, isLongitudeKey(k) { lon = validLon(value) }
+                    if time == nil, isPositionTimeKey(k) { time = asString(value) }
+                }
+                if lat != nil || lon != nil {
+                    var score = 0
+                    if lat != nil { score += 1 }
+                    if lon != nil { score += 1 }
+                    if lat != nil && lon != nil { score += 3 }  // 成对最可信
+                    if time != nil { score += 1 }
+                    if score > bestScore {
+                        bestScore = score
+                        bestLat = lat
+                        bestLon = lon
+                        bestTime = time
+                    }
+                }
+            }
+            if let pairs = node.asObject {
+                for (_, value) in pairs { visit(value) }
+            } else if let items = node.asArray {
+                for item in items { visit(item) }
+            }
+        }
+
+        visit(root)
+        // 坐标必须成对才有意义
+        if bestLat == nil || bestLon == nil {
+            return (nil, nil, bestTime)
+        }
+        return (bestLat, bestLon, bestTime)
     }
 
     /// 解析经纬度：非法值（越界、0,0、占位符）一律视为未上报。

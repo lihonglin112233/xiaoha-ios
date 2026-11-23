@@ -43,6 +43,8 @@ public final class GwmRepository: @unchecked Sendable {
     private var client: GwmClient?
     private var preferences: Preferences
     private(set) public var lastStatus: VehicleStatus?
+    /// 最近一次 getLastStatus 的原始 JSON（未裁剪、未解析），用于核对云端真实字段名。
+    private(set) public var lastRawStatus: String?
     private(set) public var lastError: String?
     private(set) public var lastUpdateAt: Date?
     private(set) public var lastVehicles: [GwmVehicle]?
@@ -74,14 +76,20 @@ public final class GwmRepository: @unchecked Sendable {
 
     // MARK: - 冷启动恢复
 
+    private func applyPendingStrategy() {
+        client?.hvacStrategy = pendingHvacStrategy
+    }
+
     private func restoreFromDisk() {
         if let injectedClient {
             client = injectedClient
+            applyPendingStrategy()
             sessionState = injectedClient.isLoggedIn ? .active : .restoring
             return
         }
         if let saved = store.load() {
             client = saved
+            applyPendingStrategy()
             sessionState = saved.isLoggedIn ? .active : .restoring
         } else {
             sessionState = .loggedOut
@@ -230,6 +238,14 @@ public final class GwmRepository: @unchecked Sendable {
     public var isPollEnabled: Bool { preferences.pollEnabled }
     public var pollIntervalSeconds: Int { preferences.pollIntervalSeconds }
 
+    /// gtsp 通道空调策略，透传给客户端。
+    public func setHvacStrategy(_ strategy: GwmClient.HvacStrategy) {
+        client?.hvacStrategy = strategy
+        pendingHvacStrategy = strategy
+    }
+
+    private var pendingHvacStrategy: GwmClient.HvacStrategy = .dedicatedCodes
+
     public func setPollIntervalSeconds(_ seconds: Int) {
         preferences.pollIntervalSeconds = max(Self.minInterval, min(3600, seconds))
     }
@@ -241,6 +257,11 @@ public final class GwmRepository: @unchecked Sendable {
     public var isRemoteEnabled: Bool { preferences.remoteEnabled }
 
     public func currentStatus() -> VehicleStatus? { lastStatus }
+
+    private func rememberRawStatus(_ json: String) {
+        lock.lock(); defer { lock.unlock() }
+        lastRawStatus = json
+    }
 
     /// 乐观更新当前车况（原实现里小组件下发成功后会先改本地状态再刷新）。
     /// 也用于测试中预置初始车况。
@@ -375,7 +396,10 @@ public final class GwmRepository: @unchecked Sendable {
 
         emitter(.refreshing(true))
         do {
-            let status = try await client.getParsedStatus(vin)
+            // 先取原始 JSON 留档，再解析，便于按云端真实字段核对定位等字段名
+            let raw = try await client.getStatus(vin)
+            rememberRawStatus(GwmCrypto.encodeDotnetJSON(raw))
+            let status = VehicleStatus.parse(raw)
             applySuccess(status, client)
             emitter(.refreshing(false))
         } catch {
@@ -383,7 +407,9 @@ public final class GwmRepository: @unchecked Sendable {
             if Self.isAuthFailure(error) {
                 do {
                     try await client.recoverSession()
-                    let status = try await client.getParsedStatus(vin)
+                    let raw = try await client.getStatus(vin)
+                    rememberRawStatus(GwmCrypto.encodeDotnetJSON(raw))
+                    let status = VehicleStatus.parse(raw)
                     persistQuietly(client)
                     applySuccess(status, client)
                 } catch {

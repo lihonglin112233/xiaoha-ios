@@ -8,13 +8,20 @@ public final class CommandExecutor: @unchecked Sendable {
         public let message: String
         public let steps: [OutcomeStep]
         public let verified: Bool
+        /// 本次执行的唯一标识：界面用它丢弃"上一条指令"的迟到回调。
+        public let runId: UUID
+        /// 本次实际下发的 controlType（不含自动补发的关窗等）。
+        public let controlType: String?
 
-        public init(success: Bool, partial: Bool, message: String, steps: [OutcomeStep], verified: Bool) {
+        public init(success: Bool, partial: Bool, message: String, steps: [OutcomeStep],
+                    verified: Bool, runId: UUID = UUID(), controlType: String? = nil) {
             self.success = success
             self.partial = partial
             self.message = message
             self.steps = steps
             self.verified = verified
+            self.runId = runId
+            self.controlType = controlType
         }
     }
 
@@ -58,8 +65,18 @@ public final class CommandExecutor: @unchecked Sendable {
 
     /// 记录一次真实下发的 controlType，便于上层/测试核对顺序。
     public private(set) var dispatchedControlTypes: [String] = []
-    /// 最近一次真实下发的 controlType（供界面展示，证明没串指令）。
-    public private(set) var lastDispatchedControlType: String?
+    /// 当前是否有指令链在执行（含 48 秒校验窗口）。
+    private(set) public var isRunning = false
+    private var activeRunId: UUID?
+    private let runLock = NSRecursiveLock()
+
+    /// 释放执行状态（仅当仍是当前运行才释放）。
+    private func finish(_ runId: UUID) {
+        runLock.lock(); defer { runLock.unlock() }
+        guard activeRunId == runId else { return }
+        isRunning = false
+        activeRunId = nil
+    }
 
     static func isTempStep(_ step: OutcomeStep) -> Bool {
         step.label.hasPrefix("调温至")
@@ -82,6 +99,24 @@ public final class CommandExecutor: @unchecked Sendable {
     /// 入口：按动作准备指令序列，逐条下发后校验车况。
     public func run(_ action: VehicleAction, body: JSONValue? = nil, minutes: Int = VehicleAction.defaultRunMinutes,
                     onProgress: ProgressHandler? = nil, completion: @escaping Callback) {
+        // 同一时刻只允许一条指令链：并发会让"上一条指令"的校验结果覆盖当前提示，
+        // 看起来就像"点了解锁却显示闪灯"。
+        runLock.lock()
+        let busy = isRunning
+        if !busy {
+            isRunning = true
+            activeRunId = UUID()
+        }
+        let runId = activeRunId ?? UUID()
+        runLock.unlock()
+
+        if busy {
+            completion(Result(success: false, partial: false,
+                              message: "上一条指令还在执行，请稍候再试",
+                              steps: [], verified: false, runId: runId, controlType: action.controlType))
+            return
+        }
+
         var controlTypes: [String] = []
         var bodies: [JSONValue?] = []
         var steps: [OutcomeStep] = []
@@ -90,20 +125,26 @@ public final class CommandExecutor: @unchecked Sendable {
         if action.needsEngine {
             let verdict = HvacGuard.canTurnOn(before)
             if !verdict.allowed {
-                completion(Result(success: false, partial: false, message: verdict.message, steps: [], verified: false))
+                finish(runId)
+                completion(Result(success: false, partial: false, message: verdict.message, steps: [],
+                                  verified: false, runId: runId, controlType: action.controlType))
                 return
             }
         }
         if action == .engineStart {
             let verdict = EngineGuard.canStart(before)
             if !verdict.allowed {
-                completion(Result(success: false, partial: false, message: verdict.message, steps: [], verified: false))
+                finish(runId)
+                completion(Result(success: false, partial: false, message: verdict.message, steps: [],
+                                  verified: false, runId: runId, controlType: action.controlType))
                 return
             }
         } else if action == .engineStop {
             let verdict = EngineGuard.canStop(before)
             if !verdict.allowed {
-                completion(Result(success: false, partial: false, message: verdict.message, steps: [], verified: false))
+                finish(runId)
+                completion(Result(success: false, partial: false, message: verdict.message, steps: [],
+                                  verified: false, runId: runId, controlType: action.controlType))
                 return
             }
         }
@@ -157,20 +198,20 @@ public final class CommandExecutor: @unchecked Sendable {
             }
         }
 
-        sendSequentially(controlTypes, bodies, steps, before, 0, onProgress: onProgress, completion: completion)
+        sendSequentially(controlTypes, bodies, steps, before, 0, runId: runId,
+                         onProgress: onProgress, completion: completion)
     }
 
     private func sendSequentially(_ controlTypes: [String], _ bodies: [JSONValue?], _ steps: [OutcomeStep],
-                                  _ before: VehicleStatus?, _ index: Int,
+                                  _ before: VehicleStatus?, _ index: Int, runId: UUID,
                                   onProgress: ProgressHandler?, completion: @escaping Callback) {
         guard index < controlTypes.count else {
-            verify(steps, before, completion)
+            verify(steps, before, runId: runId, completion)
             return
         }
         let controlType = controlTypes[index]
         let label = Self.labelOf(steps, controlType, index)
         dispatchedControlTypes.append(controlType)
-        lastDispatchedControlType = controlType
         if index > 0 {
             onProgress?("正在下发：" + label + "…")
         }
@@ -180,68 +221,77 @@ public final class CommandExecutor: @unchecked Sendable {
             case .success:
                 Task {
                     try? await Task.sleep(nanoseconds: UInt64(self.timing.stepGapOnSuccess * 1_000_000_000))
-                    self.sendSequentially(controlTypes, bodies, steps, before, index + 1,
+                    self.sendSequentially(controlTypes, bodies, steps, before, index + 1, runId: runId,
                                           onProgress: onProgress, completion: completion)
                 }
             case let .failure(error):
                 if index == 0 {
-                    completion(Result(success: false, partial: false,
+                    finish(runId)
+                completion(Result(success: false, partial: false,
                                       message: steps[0].label + "下发失败：" + error.friendlyMessage,
-                                      steps: steps, verified: false))
+                                      steps: steps, verified: false, runId: runId,
+                                      controlType: controlTypes.first))
                     return
                 }
                 onProgress?(label + "下发失败，继续校验其他项")
                 Task {
                     try? await Task.sleep(nanoseconds: UInt64(self.timing.stepGapOnFailure * 1_000_000_000))
-                    self.sendSequentially(controlTypes, bodies, steps, before, index + 1,
+                    self.sendSequentially(controlTypes, bodies, steps, before, index + 1, runId: runId,
                                           onProgress: onProgress, completion: completion)
                 }
             }
         }
     }
 
-    private func verify(_ steps: [OutcomeStep], _ before: VehicleStatus?, _ completion: @escaping Callback) {
-        tick(steps, before, completion, start: now(), iteration: 0)
+    private func verify(_ steps: [OutcomeStep], _ before: VehicleStatus?, runId: UUID,
+                        _ completion: @escaping Callback) {
+        tick(steps, before, runId: runId, completion, start: now(), iteration: 0)
     }
 
-    private func tick(_ steps: [OutcomeStep], _ before: VehicleStatus?, _ completion: @escaping Callback,
-                      start: Date, iteration: Int) {
+    private func tick(_ steps: [OutcomeStep], _ before: VehicleStatus?, runId: UUID,
+                      _ completion: @escaping Callback, start: Date, iteration: Int) {
         repository.refreshNow()
         let interval = timing.verifyInterval
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
-            self?.evaluate(steps, before, completion, start: start, iteration: iteration)
+            self?.evaluate(steps, before, runId: runId, completion, start: start, iteration: iteration)
         }
     }
 
-    func evaluate(_ steps: [OutcomeStep], _ before: VehicleStatus?, _ completion: @escaping Callback,
-                  start: Date, iteration: Int) {
+    func evaluate(_ steps: [OutcomeStep], _ before: VehicleStatus?, runId: UUID,
+                  _ completion: @escaping Callback, start: Date, iteration: Int) {
         let current = repository.currentStatus()
         let state = CommandOutcome.judgeAll(steps, current)
         let elapsed = now().timeIntervalSince(start)
         let label = steps.isEmpty ? "" : steps[0].label
 
         if state == .done {
+            finish(runId)
             completion(Result(success: true, partial: false,
                               message: label + "成功" + CommandOutcome.sideEffects(steps, before, current),
-                              steps: steps, verified: true))
+                              steps: steps, verified: true, runId: runId,
+                              controlType: steps.first?.controlType))
             return
         }
         if state == .unverifiable, iteration >= timing.maxIterationsBeforeUnverifiable {
             let suffix = steps.first.map(Self.isTempStep) == true
                 ? "（该车型不回读设定温度，无法确认是否生效）"
                 : "（该车型无状态可校验）"
+            finish(runId)
             completion(Result(success: true, partial: false, message: label + "：指令已下发" + suffix,
-                              steps: steps, verified: false))
+                              steps: steps, verified: false, runId: runId,
+                              controlType: steps.first?.controlType))
             return
         }
         if elapsed > timing.verifyTimeout {
             let partial = !CommandOutcome.done(steps, current).isEmpty
+            finish(runId)
             completion(Result(success: false, partial: partial,
                               message: CommandOutcome.feedback(label, steps, current, true),
-                              steps: steps, verified: false))
+                              steps: steps, verified: false, runId: runId,
+                              controlType: steps.first?.controlType))
             return
         }
-        tick(steps, before, completion, start: start, iteration: iteration + 1)
+        tick(steps, before, runId: runId, completion, start: start, iteration: iteration + 1)
     }
 }
