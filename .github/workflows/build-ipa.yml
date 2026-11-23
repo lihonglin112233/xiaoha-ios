@@ -64,7 +64,6 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGN_ENTITLEMENTS="" \
             ENABLE_USER_SCRIPT_SANDBOXING=NO \
             ONLY_ACTIVE_ARCH=NO
 
@@ -74,16 +73,22 @@ jobs:
           APPS_DIR="build/XiaoHaCar.xcarchive/Products/Applications"
           APP_PATH="$(find "$APPS_DIR" -maxdepth 1 -name '*.app' | head -1)"
           echo "APP_PATH=$APP_PATH"
-          # 先签内嵌扩展，再签主 App，顺序不能反
+          # 先签内嵌扩展，再签主 App，顺序不能反。
+          # 必须显式传 --entitlements，否则 App Group 不会进入 app，小组件拿不到数据。
+          ENT_DIR="App"
           find "$APP_PATH" -name "*.appex" -maxdepth 3 -print0 | while IFS= read -r -d '' appex; do
             echo "codesign appex: $appex"
-            codesign --force --sign - --timestamp=none "$appex"
+            codesign --force --sign - --timestamp=none \
+              --entitlements "$ENT_DIR/XiaoHaWidget/XiaoHaWidget.entitlements" "$appex"
           done
           echo "codesign app: $APP_PATH"
-          codesign --force --sign - --timestamp=none "$APP_PATH"
+          codesign --force --sign - --timestamp=none \
+            --entitlements "$ENT_DIR/XiaoHaCar/XiaoHaCar.entitlements" "$APP_PATH"
           echo "--- 校验 ---"
           codesign -dv --verbose=2 "$APP_PATH" 2>&1 | head -12
           codesign --verify --deep --strict "$APP_PATH" && echo "verify OK"
+          echo "--- 确认 App Group 已写入 ---"
+          codesign -d --entitlements - "$APP_PATH" 2>&1 | head -20
 
       - name: 打包成 ipa
         run: |

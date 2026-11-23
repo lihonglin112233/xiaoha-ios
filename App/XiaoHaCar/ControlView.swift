@@ -99,12 +99,43 @@ struct ControlView: View {
                         Label("刷新", systemImage: "arrow.clockwise").font(.caption)
                     }
                 }
+                locationRow
                 if let error = env.lastError {
                     Text(error).font(.caption).foregroundStyle(.red)
                 }
                 if let reauth = env.reauthMessage {
                     Text(reauth).font(.caption).foregroundStyle(.orange)
                 }
+            }
+        }
+    }
+
+    /// 车辆定位：服务端上报就显示，未上报如实说明（原 APK 不解析经纬度）。
+    @ViewBuilder
+    private var locationRow: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "location.fill").font(.caption2)
+            if let status, status.hasCoordinate,
+               let lat = status.latitude, let lon = status.longitude {
+                Text(String(format: "%.5f, %.5f", lat, lon))
+                    .font(.caption.monospacedDigit())
+                if let time = status.positionTime {
+                    Text("· \(time)").font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    UIPasteboard.general.string = String(format: "%.6f,%.6f", lat, lon)
+                    env.banner = .init(text: "坐标已复制", isError: false)
+                } label: {
+                    Image(systemName: "doc.on.doc").font(.caption2)
+                }
+                Link(destination: URL(string: "http://maps.apple.com/?ll=\(lat),\(lon)&q=车辆位置")!) {
+                    Image(systemName: "map").font(.caption2)
+                }
+            } else {
+                Text(env.isLoggedIn ? "该车型未上报定位" : "登录后显示")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
             }
         }
     }
@@ -436,6 +467,27 @@ struct ControlView: View {
                         env.refreshSnapshot()
                         env.repository.refreshNow()
                     }
+                }
+                Divider()
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("刷新间隔").font(.subheadline)
+                        Text("每 \(env.refreshIntervalSeconds) 秒同步一次车况")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Picker("间隔", selection: Binding(
+                        get: { env.refreshIntervalSeconds },
+                        set: { env.refreshIntervalSeconds = $0 }
+                    )) {
+                        ForEach([30, 60, 120, 300, 600, 1800, 3600], id: \.self) { seconds in
+                            Text(seconds < 60 ? "\(seconds) 秒"
+                                 : seconds < 3600 ? "\(seconds / 60) 分钟"
+                                 : "\(seconds / 3600) 小时")
+                                .tag(seconds)
+                        }
+                    }
+                    .pickerStyle(.menu)
                 }
                 Divider()
                 Toggle(isOn: Binding(

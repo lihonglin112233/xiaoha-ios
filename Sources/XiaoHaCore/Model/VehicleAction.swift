@@ -137,8 +137,8 @@ public enum GwmCommand {
     static let timelyCommands: Set<String> = [whistle, flash, whistleFlash, acStart, acStop, steerHeatStart]
     static let timelyWithBody: Set<String> = [acStart]
 
-    /// 走 AutoAI（gtsp）平台的指令码。
-    static let autoAiCodes: [String: Int] = [
+    /// 走 AutoAI（gtsp）平台的指令码。公开供上层/测试核对映射。
+    public static let autoAiCodes: [String: Int] = [
         unlock: 1,
         lock: 2,
         windowClose: 3,

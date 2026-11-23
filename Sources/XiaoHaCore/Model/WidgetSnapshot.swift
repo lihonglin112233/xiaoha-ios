@@ -55,22 +55,48 @@ public enum WidgetStore {
     public static let suiteName = "group.com.xiaoha.car"
     public static let key = "widget_snapshot"
 
-    /// App Group 在自签 / TrollStore 环境可能不可用（没有真实 provisioning profile），
-    /// 此时退回到标准 UserDefaults：同一进程内仍可用，跨进程共享会失效。
-    private static var container: UserDefaults {
-        UserDefaults(suiteName: suiteName) ?? .standard
-    }
+    /// 注意：UserDefaults(suiteName:) 在缺少 App Group 权限时仍会返回非 nil，
+    /// 但那份数据落在"本 App 私有"域里，小组件进程读不到。
+    /// 所以这里同时写共享域与标准域，读取时优先共享域，尽量提高命中率。
+    private static var shared: UserDefaults? { UserDefaults(suiteName: suiteName) }
 
+    /// App Group 是否真的可用（用能否读到共享域写入来验证）。
     public static func isSharedContainerAvailable() -> Bool {
-        UserDefaults(suiteName: suiteName) != nil
-    }
-
-    public static func load() -> WidgetSnapshot {
-        WidgetSnapshot.decoded(container.data(forKey: key)) ?? WidgetSnapshot()
+        guard let shared else { return false }
+        let probe = "widget_probe"
+        let token = UUID().uuidString
+        shared.set(token, forKey: probe)
+        let ok = shared.string(forKey: probe) == token
+        shared.removeObject(forKey: probe)
+        return ok
     }
 
     public static func save(_ snapshot: WidgetSnapshot) {
         guard let data = snapshot.encoded() else { return }
-        container.set(data, forKey: key)
+        // 共享域（小组件能读到）
+        shared?.set(data, forKey: key)
+        // 标准域兜底（主 App 自己下次启动仍能读到）
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    public static func load() -> WidgetSnapshot {
+        if let data = shared?.data(forKey: key), let snapshot = WidgetSnapshot.decoded(data) {
+            return snapshot
+        }
+        if let data = UserDefaults.standard.data(forKey: key),
+           let snapshot = WidgetSnapshot.decoded(data) {
+            return snapshot
+        }
+        return WidgetSnapshot()
+    }
+
+    /// 供界面显示"小组件为何没数据"的诊断信息。
+    public static func diagnostics() -> String {
+        let sharedAvailable = isSharedContainerAvailable()
+        let hasData = shared?.data(forKey: key) != nil
+        if !sharedAvailable {
+            return "App Group 不可用：小组件无法读取数据（自签/TrollStore 可能缺少 entitlement）"
+        }
+        return hasData ? "共享数据正常" : "App Group 可用，但还没有写入过车况"
     }
 }

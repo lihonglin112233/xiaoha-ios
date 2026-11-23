@@ -58,6 +58,8 @@ public final class CommandExecutor: @unchecked Sendable {
 
     /// 记录一次真实下发的 controlType，便于上层/测试核对顺序。
     public private(set) var dispatchedControlTypes: [String] = []
+    /// 最近一次真实下发的 controlType（供界面展示，证明没串指令）。
+    public private(set) var lastDispatchedControlType: String?
 
     static func isTempStep(_ step: OutcomeStep) -> Bool {
         step.label.hasPrefix("调温至")
@@ -168,6 +170,7 @@ public final class CommandExecutor: @unchecked Sendable {
         let controlType = controlTypes[index]
         let label = Self.labelOf(steps, controlType, index)
         dispatchedControlTypes.append(controlType)
+        lastDispatchedControlType = controlType
         if index > 0 {
             onProgress?("正在下发：" + label + "…")
         }

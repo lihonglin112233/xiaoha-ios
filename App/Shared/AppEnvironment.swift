@@ -216,6 +216,16 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// 自定义车况刷新间隔（秒）。
+    var refreshIntervalSeconds: Int {
+        get { settings.pollIntervalSeconds }
+        set {
+            settings.pollIntervalSeconds = max(GwmRepository.minInterval, min(3600, newValue))
+            repository.setPollIntervalSeconds(settings.pollIntervalSeconds)
+            BackgroundPoller.shared.restartTimer(interval: TimeInterval(settings.pollIntervalSeconds))
+        }
+    }
+
     func setSelectedVin(_ vin: String) {
         repository.setSelectedVin(vin)
         settings.selectedVin = vin
@@ -231,9 +241,11 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
     func perform(_ action: VehicleAction, body: JSONValue? = nil, minutes: Int? = nil) {
         let label = (body?.value("temperature")?.asDouble).map { TempControl.labelOf($0) } ?? action.label
         let runMinutes = minutes ?? self.runMinutes
+        // 显示真实下发的 controlType 与指令码，便于区分"点了什么"和"实际发了什么"
+        let wire = Self.wireDescription(action)
         onMain { [weak self] in
             self?.progressText = nil
-            self?.banner = Banner(text: label + "：正在下发…", isError: false)
+            self?.banner = Banner(text: label + "：正在下发（" + wire + "）", isError: false)
         }
         executor.run(action, body: body, minutes: runMinutes, onProgress: { [weak self] message in
             self?.onMain { self?.progressText = message }
@@ -241,13 +253,24 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
             self?.onMain {
                 guard let self else { return }
                 self.progressText = nil
-                self.banner = Banner(text: result.message, isError: !result.success && !result.partial)
+                let wire = self.executor.lastDispatchedControlType.map { " [" + $0 + "]" } ?? ""
+                self.banner = Banner(text: result.message + wire,
+                                     isError: !result.success && !result.partial)
                 self.alerts.append(.init(item: label, text: result.message, good: result.success))
                 self.unread = self.alertCenter.unreadCount
                 self.refreshSnapshot()
                 if result.success { BackgroundRefresh.shared.request() }
             }
         })
+    }
+
+    /// 形如 "VEHICLE_UNLOCK / cmdCode 1" 或 "VEHICLE_LOCK / T5"，用于自证下发内容。
+    static func wireDescription(_ action: VehicleAction) -> String {
+        let controlType = action.controlType
+        if let code = GwmCommand.autoAiCodes[controlType] {
+            return controlType + " / cmdCode " + String(code)
+        }
+        return controlType + " / T5"
     }
 
     func setTemp(_ newValue: Double) {

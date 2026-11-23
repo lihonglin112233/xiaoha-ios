@@ -55,6 +55,11 @@ public struct VehicleStatus: Equatable, Sendable {
     public var tireTempFr: Double?
     public var tireTempRl: Double?
     public var tireTempRr: Double?
+    /// 车辆定位。原 APK 不解析经纬度，这里按常见字段名容错提取；
+    /// 服务端未返回时为 nil，界面需如实说明"未上报"。
+    public var latitude: Double?
+    public var longitude: Double?
+    public var positionTime: String?
     public var windowFrontLeft: Bool?
     public var windowFrontRight: Bool?
     public var windowRearLeft: Bool?
@@ -97,6 +102,25 @@ public struct VehicleStatus: Equatable, Sendable {
 
         status.acquisitionTime = asString(first(root.value("acquisitiontime"), info.value("acquisitiontime")))
         status.gpsSwitchOn = asString(first(info.value("gpsswitchon"), root.value("gpsswitchon")))
+        // 定位：优先嵌套对象，其次平铺字段；全部走大小写不敏感的常见命名
+        let locationContainer = first(
+            info.value("position"), info.value("location"), info.value("gps"),
+            root.value("position"), root.value("location"), root.value("gps")
+        )
+        status.latitude = Self.parseCoordinate(first(
+            locationContainer?.value("lat"), locationContainer?.value("latitude"),
+            info.value("lat"), info.value("latitude"), root.value("lat"), root.value("latitude")
+        ))
+        status.longitude = Self.parseCoordinate(first(
+            locationContainer?.value("lon"), locationContainer?.value("lng"),
+            locationContainer?.value("longitude"),
+            info.value("lon"), info.value("lng"), info.value("longitude"),
+            root.value("lon"), root.value("lng"), root.value("longitude")
+        ))
+        status.positionTime = asString(first(
+            locationContainer?.value("time"), locationContainer?.value("positiontime"),
+            info.value("positiontime"), root.value("positiontime")
+        ))
         status.tboxStatus = asString(first(root.value("tboxstatus"), info.value("tboxstate"), info.value("tboxstatus")))
         status.fuelGauge = asString(first(info.value("oilqty"), root.value("oilqty")))
         status.fuelVolume = parseValue(info.value("remainoil"))
@@ -214,6 +238,20 @@ public struct VehicleStatus: Equatable, Sendable {
         default:
             return nil
         }
+    }
+
+    /// 解析经纬度：非法值（越界、0,0、占位符）一律视为未上报。
+    static func parseCoordinate(_ value: JSONValue?) -> Double? {
+        guard let raw = parseValue(value) else { return nil }
+        // 0,0 是无效坐标（大西洋几内亚湾），视为未上报
+        if raw == 0 { return nil }
+        return raw
+    }
+
+    /// 坐标是否可用（成对且在中国大陆/常规范围内）。
+    public var hasCoordinate: Bool {
+        guard let latitude, let longitude else { return false }
+        return abs(latitude) <= 90 && abs(longitude) <= 180
     }
 
     static func statusText(_ value: JSONValue?) -> String? {

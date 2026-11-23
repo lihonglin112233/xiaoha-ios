@@ -24,11 +24,17 @@ final class BackgroundPoller {
     }
 
     /// 回到前台时启动短周期定时器，退到后台后转交 BGTask。
-    func startForegroundPolling() {
+    func startForegroundPolling(interval: TimeInterval = 60) {
         guard foregroundTimer == nil else { return }
-        foregroundTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+        foregroundTimer = Timer.scheduledTimer(withTimeInterval: max(30, interval), repeats: true) { _ in
             AppEnvironment.shared.repository.refreshNow()
         }
+    }
+
+    /// 间隔变更时重启定时器，立即生效。
+    func restartTimer(interval: TimeInterval) {
+        stopForegroundPolling()
+        startForegroundPolling(interval: interval)
     }
 
     func stopForegroundPolling() {
