@@ -56,6 +56,8 @@ public final class GwmRepository: @unchecked Sendable {
     private var destroyed = false
     private var pollTask: Task<Void, Never>?
     private var polling = false
+    /// 手动刷新专用的防抖标志（与轮询解耦）。
+    private var manualRefreshing = false
     private let alertCenter: StatusAlertCenter
     private let emitter: @Sendable (Event) -> Void
     private let now: @Sendable () -> Date
@@ -119,10 +121,17 @@ public final class GwmRepository: @unchecked Sendable {
         do {
             let vehicles = try await client.getVehicles()
             guard !destroyed, self.client === client else { return }
-            lastVehicles = vehicles
+            rememberVehicles(vehicles)
             persistQuietly(client)
             setSessionState(.active, nil)
             emitter(.loginStateChanged(true))
+            // 冷启动恢复后立即拉一次车况，否则界面会一直显示"车况未同步"。
+            if preferences.selectedVin == nil, let first = vehicles.first {
+                preferences.selectedVin = first.vin
+            }
+            if preferences.selectedVin != nil {
+                await refresh(notifyErrors: false)
+            }
         } catch {
             if await client.reviveSessionQuietly() {
                 persistQuietly(client)
@@ -289,23 +298,18 @@ public final class GwmRepository: @unchecked Sendable {
         lastStatus = status
     }
 
-    /// 同步清除刷新标志，避免在 async 上下文直接持锁。
-    private func endRefreshFlag() {
-        lock.lock(); defer { lock.unlock() }
-        polling = false
-    }
-
-    /// 手动刷新：加防抖，避免连点导致多个请求并发、状态反复广播。
+    /// 手动刷新：用独立标志防连点，绝不复用轮询标志。
+    /// 之前复用 polling 导致一次异常后永久卡住（表现为"重新打开也显示未同步"）。
     public func refreshNow() {
         lock.lock()
-        let alreadyRefreshing = polling
-        polling = true
+        let alreadyRefreshing = manualRefreshing
+        manualRefreshing = true
         lock.unlock()
         guard !alreadyRefreshing else { return }
         Task { [weak self] in
             guard let self else { return }
             await self.refresh(notifyErrors: true)
-            self.endRefreshFlag()
+            self.clearManualRefreshing()
         }
     }
 
@@ -331,6 +335,16 @@ public final class GwmRepository: @unchecked Sendable {
             persistQuietly(client)
             setSessionState(.active, nil)
             emitter(.loginStateChanged(true))
+            // 选择车辆（若尚未选择），并立即同步一次车况
+            if preferences.selectedVin == nil {
+                if let vehicles = try? await client.getVehicles(), let first = vehicles.first {
+                    rememberVehicles(vehicles)
+                    preferences.selectedVin = first.vin
+                }
+            }
+            if preferences.selectedVin != nil {
+                await refresh(notifyErrors: false)
+            }
             if preferences.pollEnabled { startPolling() }
         } else {
             setSessionState(.expired, "登录已过期，需要重新验证一次")
@@ -395,9 +409,27 @@ public final class GwmRepository: @unchecked Sendable {
     }
 
     public func pollOnce() async {
-        guard !polling else { return }
-        polling = true
+        guard beginPolling() else { return }
         await refresh(notifyErrors: false)
+        clearPolling()
+    }
+
+    /// 原子地开始一次轮询，返回 false 表示已有轮询在进行。
+    private func beginPolling() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if polling { return false }
+        polling = true
+        return true
+    }
+
+    /// 同步清理标志，避免在 async 上下文直接持锁。
+    private func clearManualRefreshing() {
+        lock.lock(); defer { lock.unlock() }
+        manualRefreshing = false
+    }
+
+    private func clearPolling() {
+        lock.lock(); defer { lock.unlock() }
         polling = false
     }
 

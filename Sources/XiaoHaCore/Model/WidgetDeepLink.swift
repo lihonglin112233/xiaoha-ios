@@ -1,5 +1,4 @@
 import Foundation
-import XiaoHaCore
 
 /// 小组件深链：iOS 16 的小组件不支持交互按钮（那是 iOS 17 的 AppIntent 能力），
 /// 因此在 iOS 16 上改为"点按钮 → 用深链唤起 App → App 内立即执行"。

@@ -229,6 +229,32 @@ final class CommandExecutorTests: XCTestCase {
         XCTAssertEqual(executor.dispatchedControlTypes.first, "VEHICLE_UNLOCK")
     }
 
+    /// 回归：一次失败的刷新不能永久卡住后续刷新
+    /// （之前 refreshNow 复用轮询标志，异常后表现为"重新打开也显示未同步"）。
+    func testRefreshDoesNotStickAfterFailure() async throws {
+        let transport = StubTransport()
+        var callCount = 0
+        transport.on(path: "getLastStatus") { _ in
+            callCount += 1
+            if callCount == 1 {
+                return json("{\"code\":\"500\"}", status: 500)   // 第一次失败
+            }
+            return json("{\"code\":\"0\",\"data\":{\"vehicleStatusInfo\":{\"esclLockSts\":\"0\",\"remainElectricPercent\":\"70\"}}}")
+        }
+        let (repo, _) = makeRepository(transport)
+        repo.setCurrentStatus(nil)
+
+        repo.refreshNow()
+        try await Task.sleep(nanoseconds: 600_000_000)
+        XCTAssertNil(repo.currentStatus(), "首次失败时不应有车况")
+
+        // 第二次刷新必须仍然可以发出并成功
+        repo.refreshNow()
+        try await Task.sleep(nanoseconds: 900_000_000)
+        XCTAssertNotNil(repo.currentStatus(), "刷新失败后必须能恢复，不能被永久卡住")
+        XCTAssertEqual(repo.currentStatus()?.batteryPercent, 70)
+    }
+
     /// 车况始终没变化 → 超时后报未生效。
     func testTimeoutReportsNotEffective() async throws {
         var before = VehicleStatus()

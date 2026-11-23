@@ -97,9 +97,13 @@ struct CarWidgetView: View {
             }
             .padding(.bottom, 10)
 
+            Spacer(minLength: 6)
             actionRow
         }
-        .padding(14)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .padding(.horizontal, 14)
+        .padding(.top, 14)
+        .padding(.bottom, 16)
     }
 
     // MARK: 大尺寸：同中尺寸但留白更多
@@ -131,10 +135,13 @@ struct CarWidgetView: View {
             }
             .padding(.bottom, 14)
 
+            Spacer(minLength: 8)
             actionRow
-            Spacer(minLength: 0)
         }
-        .padding(16)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+        .padding(.bottom, 18)
     }
 
     // MARK: - 组件
