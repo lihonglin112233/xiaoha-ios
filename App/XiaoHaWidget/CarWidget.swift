@@ -32,141 +32,220 @@ struct CarWidgetView: View {
     private var snapshot: WidgetSnapshot { entry.snapshot }
 
     var body: some View {
-        // 关键：内容必须撑满整个 widget 容器，否则背景会收缩、内容堆在左上角。
-        layout
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .modifier(WidgetBackground())
-    }
-
-    @ViewBuilder
-    private var layout: some View {
-        switch family {
-        case .systemSmall:
-            smallLayout
-        case .systemLarge:
-            largeLayout
-        default:
-            mediumLayout
-        }
-    }
-
-    // MARK: 小尺寸：标题 + 三项指标
-
-    private var smallLayout: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-                .padding(.bottom, 10)
-            HStack(alignment: .top, spacing: 12) {
-                metric("门锁", snapshot.locked.map { $0 ? "已锁" : "未锁" } ?? "--",
-                       tint: snapshot.locked == true ? .green : .orange)
-                metric("电量", snapshot.battery.map { "\(Int($0))%" } ?? "--", tint: .blue)
-            }
-            Spacer(minLength: 8)
-            HStack {
-                metric("续航", snapshot.range.map { "\(Int($0)) km" } ?? "--", tint: .teal)
-                Spacer()
-                Text(entry.date, style: .time)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(14)
-    }
-
-    // MARK: 中尺寸：状态 + 4 个按钮（启动/锁车/解锁/关窗）
-
-    private var mediumLayout: some View {
+        // 内容撑满容器，按钮固定贴底
         VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 0) {
-                VStack(alignment: .leading, spacing: 6) {
-                    header
-                    HStack(spacing: 16) {
-                        metric("门锁", snapshot.locked.map { $0 ? "已锁" : "未锁" } ?? "--",
-                               tint: snapshot.locked == true ? .green : .orange)
-                        metric("电量", snapshot.battery.map { "\(Int($0))%" } ?? "--", tint: .blue)
-                        metric("续航", snapshot.range.map { "\(Int($0)) km" } ?? "--", tint: .teal)
-                    }
-                }
-                Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 6) {
-                    engineBadge
-                    Text(entry.date, style: .time)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.bottom, 10)
-
+            header
+                .padding(.bottom, 8)
+            content
             Spacer(minLength: 6)
             actionRow
         }
-        .frame(maxHeight: .infinity, alignment: .top)
-        .padding(.horizontal, 14)
-        .padding(.top, 14)
-        .padding(.bottom, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .modifier(WidgetBackground())
     }
 
-    // MARK: 大尺寸：同中尺寸但留白更多
-
-    private var largeLayout: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 8) {
-                    header
-                    HStack(spacing: 22) {
-                        metric("门锁", snapshot.locked.map { $0 ? "已锁" : "未锁" } ?? "--",
-                               tint: snapshot.locked == true ? .green : .orange)
-                        metric("电量", snapshot.battery.map { "\(Int($0))%" } ?? "--", tint: .blue)
-                        metric("续航", snapshot.range.map { "\(Int($0)) km" } ?? "--", tint: .teal)
-                    }
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 8) {
-                    engineBadge
-                    if snapshot.acOn == true {
-                        Label("空调开", systemImage: "snowflake")
-                            .font(.caption2)
-                            .foregroundStyle(.cyan)
-                    }
-                    Text(entry.date, style: .time)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.bottom, 14)
-
-            Spacer(minLength: 8)
-            actionRow
-        }
-        .frame(maxHeight: .infinity, alignment: .top)
-        .padding(.horizontal, 16)
-        .padding(.top, 16)
-        .padding(.bottom, 18)
-    }
-
-    // MARK: - 组件
+    // MARK: 头部（车名 + 引擎状态）
 
     private var header: some View {
-        Text(snapshot.vehicleName)
-            .font(.caption.bold())
-            .lineLimit(1)
-            .truncationMode(.tail)
-    }
-
-    private var engineBadge: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(snapshot.engineRunning ? Color.green : Color.secondary.opacity(0.45))
-                .frame(width: 7, height: 7)
-            Text(snapshot.engineText)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(snapshot.vehicleName)
+                    .font(.system(size: family == .systemSmall ? 11 : 13, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if let model = snapshot.modelName, !model.isEmpty, model != snapshot.vehicleName {
+                    Text(model)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 2)
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(snapshot.engineRunning ? Color.green : Color.secondary.opacity(0.45))
+                    .frame(width: 6, height: 6)
+                Text(snapshot.engineText)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
-    /// 四个动作按钮：远程启动、锁车、解锁、关车窗。
+    // MARK: 内容区
+
+    @ViewBuilder
+    private var content: some View {
+        switch family {
+        case .systemSmall:
+            smallContent
+        case .systemLarge:
+            largeContent
+        default:
+            mediumContent
+        }
+    }
+
+    /// 小尺寸：只放指标 + 紧凑车身
+    private var smallContent: some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
+                metricRow
+                tireLegend
+            }
+            Spacer(minLength: 0)
+            carDiagram(width: 46, height: 82)
+        }
+    }
+
+    /// 中尺寸：左侧指标，右侧车身
+    private var mediumContent: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 7) {
+                metricRow
+                if let range = snapshot.range {
+                    Text("续航 \(Int(range)) km")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.teal)
+                }
+            }
+            Spacer(minLength: 0)
+            carDiagram(width: 62, height: 96)
+                .padding(.trailing, 6)
+        }
+    }
+
+    /// 大尺寸：指标 + 居中大车身
+    private var largeContent: some View {
+        VStack(spacing: 8) {
+            HStack(alignment: .top) {
+                metricRow
+                Spacer()
+                if let range = snapshot.range {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("续航").font(.system(size: 9)).foregroundStyle(.secondary)
+                        Text("\(Int(range)) km")
+                            .font(.system(size: 15, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(.teal)
+                    }
+                }
+            }
+            Spacer(minLength: 2)
+            carDiagram(width: 92, height: 150)
+            Spacer(minLength: 2)
+        }
+    }
+
+    private var metricRow: some View {
+        HStack(spacing: 14) {
+            metric("门锁", snapshot.locked.map { $0 ? "已锁" : "未锁" } ?? "--",
+                   tint: snapshot.locked == true ? .green : .orange)
+            metric("电量", snapshot.battery.map { "\(Int($0))%" } ?? "--", tint: .blue)
+            if family == .systemLarge {
+                metric("续航", snapshot.range.map { "\(Int($0)) km" } ?? "--", tint: .teal)
+            }
+        }
+    }
+
+    private var tireLegend: some View {
+        Text("胎压 " + snapshot.tireTexts.joined(separator: " / "))
+            .font(.system(size: 8))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+    }
+
+    private func metric(_ title: String, _ value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title).font(.system(size: 9)).foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: family == .systemLarge ? 16 : 14, weight: .semibold).monospacedDigit())
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+    }
+
+    // MARK: 俯视车身 + 四轮胎压
+
+    /// 车身上画四个轮位，胎压数值标在轮子外侧；告警轮用红色。
+    private func carDiagram(width: CGFloat, height: CGFloat) -> some View {
+        let texts = snapshot.tireTexts
+        let alarms = snapshot.tireAlarms
+        let bodyWidth = width * 0.56
+        let tireW = width * 0.19
+        let tireH = height * 0.15
+
+        return ZStack {
+            // 车身
+            RoundedRectangle(cornerRadius: bodyWidth * 0.30)
+                .fill(Color.accentColor.opacity(0.14))
+                .overlay(
+                    RoundedRectangle(cornerRadius: bodyWidth * 0.30)
+                        .stroke(Color.accentColor.opacity(0.30), lineWidth: 1)
+                )
+                .frame(width: bodyWidth, height: height)
+            // 前/后风挡
+            VStack {
+                RoundedRectangle(cornerRadius: bodyWidth * 0.10)
+                    .fill(Color.accentColor.opacity(0.18))
+                    .frame(width: bodyWidth * 0.62, height: height * 0.15)
+                Spacer()
+                RoundedRectangle(cornerRadius: bodyWidth * 0.10)
+                    .fill(Color.accentColor.opacity(0.14))
+                    .frame(width: bodyWidth * 0.62, height: height * 0.15)
+            }
+            .frame(height: height * 0.82)
+
+            // 四个轮位
+            tire(fl: true, top: true, texts: texts, alarms: alarms,
+                 tireW: tireW, tireH: tireH, bodyWidth: bodyWidth, width: width, height: height)
+            tire(fl: false, top: true, texts: texts, alarms: alarms,
+                 tireW: tireW, tireH: tireH, bodyWidth: bodyWidth, width: width, height: height)
+            tire(fl: true, top: false, texts: texts, alarms: alarms,
+                 tireW: tireW, tireH: tireH, bodyWidth: bodyWidth, width: width, height: height)
+            tire(fl: false, top: false, texts: texts, alarms: alarms,
+                 tireW: tireW, tireH: tireH, bodyWidth: bodyWidth, width: width, height: height)
+        }
+        .frame(width: width, height: height)
+    }
+
+    @ViewBuilder
+    private func tire(fl: Bool, top: Bool, texts: [String], alarms: [Bool],
+                      tireW: CGFloat, tireH: CGFloat, bodyWidth: CGFloat,
+                      width: CGFloat, height: CGFloat) -> some View {
+        let index = (top ? 0 : 2) + (fl ? 0 : 1)
+        let alarm = alarms[index]
+        let color: Color = alarm ? .red : .primary
+        let offsetX = (bodyWidth / 2) + tireW / 2 + 1
+        let sign: CGFloat = fl ? -1 : 1
+        let yOffset = top ? -(height * 0.30) : (height * 0.30)
+        HStack(spacing: 2) {
+            if fl {
+                Text(texts[index])
+                    .font(.system(size: 9, weight: .medium).monospacedDigit())
+                    .foregroundStyle(color)
+            }
+            RoundedRectangle(cornerRadius: tireW * 0.38)
+                .fill(alarm ? Color.red.opacity(0.16) : Color.secondary.opacity(0.16))
+                .overlay(
+                    RoundedRectangle(cornerRadius: tireW * 0.38)
+                        .stroke(color.opacity(alarm ? 0.85 : 0.35), lineWidth: 1)
+                )
+                .frame(width: tireW, height: tireH)
+            if !fl {
+                Text(texts[index])
+                    .font(.system(size: 9, weight: .medium).monospacedDigit())
+                    .foregroundStyle(color)
+            }
+        }
+        .offset(x: sign * offsetX * 0.62, y: yOffset)
+    }
+
+    // MARK: 底部四个按钮
+
     private var actionRow: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 7) {
             actionButton(.engineStart)
             actionButton(.lock)
             actionButton(.unlock)
@@ -174,32 +253,20 @@ struct CarWidgetView: View {
         }
     }
 
-    private func metric(_ title: String, _ value: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.system(size: 10)).foregroundStyle(.secondary)
-            Text(value)
-                .font(.system(size: 15, weight: .semibold).monospacedDigit())
-                .foregroundStyle(tint)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-        }
-    }
-
-    /// iOS 16 不支持小组件 AppIntent 按钮，统一用深链唤起 App 执行。
     @ViewBuilder
     private func actionButton(_ link: WidgetDeepLink) -> some View {
         if let url = link.url {
             Link(destination: url) {
-                VStack(spacing: 4) {
+                VStack(spacing: 3) {
                     Image(systemName: link.systemImage)
-                        .font(.system(size: 15, weight: .medium))
+                        .font(.system(size: family == .systemLarge ? 15 : 13, weight: .medium))
                     Text(link.title)
-                        .font(.system(size: 10))
+                        .font(.system(size: family == .systemLarge ? 10 : 9))
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
+                .padding(.vertical, family == .systemLarge ? 8 : 6)
                 .background(Color.accentColor.opacity(0.12))
                 .foregroundStyle(Color.accentColor)
                 .clipShape(RoundedRectangle(cornerRadius: 9))

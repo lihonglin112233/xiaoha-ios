@@ -307,9 +307,29 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
     }
 
     /// 小组件深链进入后立即执行（iOS 16 小组件不能直接发指令）。
+    /// 小组件按钮入口：冷启动时会话可能还没恢复完，不能直接判定未登录，
+    /// 先等待恢复（最多几秒）再执行，否则后台被清掉后按键完全无响应。
     func handleWidgetAction(_ link: WidgetDeepLink) {
-        guard isLoggedIn else {
+        let hasAccount = repository.hasAccount
+        if !isLoggedIn && !hasAccount {
             banner = Banner(text: "请先打开 App 登录后再使用小组件按钮", isError: true)
+            return
+        }
+        if !isLoggedIn {
+            // 会话恢复中：等一次恢复结果，再继续执行
+            banner = Banner(text: "正在恢复登录状态…", isError: false)
+            Task { [weak self] in
+                await self?.repository.restoreSessionQuietly()
+                self?.onMain { self?.continueWidgetAction(link) }
+            }
+            return
+        }
+        continueWidgetAction(link)
+    }
+
+    private func continueWidgetAction(_ link: WidgetDeepLink) {
+        guard isLoggedIn else {
+            banner = Banner(text: "登录已过期，请打开 App 重新登录", isError: true)
             return
         }
         guard let action = link.vehicleAction else {

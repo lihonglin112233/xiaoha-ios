@@ -91,6 +91,42 @@ final class WidgetDeepLinkTests: XCTestCase {
         XCTAssertGreaterThan(snapshot.vehicleName.count, 20)
     }
 
+    /// 胎压必须能存进快照并原样读出，供小组件四轮显示。
+    func testTirePressureSnapshot() {
+        var status = VehicleStatus()
+        status.tirePressureFl = 2.4
+        status.tirePressureFr = 2.35
+        status.tirePressureRl = 2.2
+        status.tirePressureRr = 2.5
+        status.tireAlarmRl = true
+        let snapshot = WidgetSnapshot(status: status, vehicle: nil, updatedAt: Date())
+
+        XCTAssertEqual(snapshot.tireTexts, ["2.4", "2.4", "2.2", "2.5"])
+        XCTAssertEqual(snapshot.tireAlarms, [false, false, true, false])
+
+        WidgetStore.save(snapshot)
+        let loaded = WidgetStore.load()
+        XCTAssertEqual(loaded.tireFl, 2.4)
+        XCTAssertEqual(loaded.tireRl, 2.2)
+        XCTAssertEqual(loaded.tireAlarmRl, true)
+    }
+
+    /// 未上报胎压时显示 "--"，不能出现 0.0 之类的假数据。
+    func testTirePressureMissingShowsPlaceholder() {
+        let status = VehicleStatus()
+        let snapshot = WidgetSnapshot(status: status, vehicle: nil, updatedAt: Date())
+        XCTAssertEqual(snapshot.tireTexts, ["--", "--", "--", "--"])
+        XCTAssertEqual(snapshot.tireAlarms, [false, false, false, false])
+    }
+
+    /// 车型应写入快照供小组件标题显示。
+    func testModelNameSnapshot() {
+        let vehicle = GwmVehicle(vin: "LSVAA1", modelName: "哈弗第三代H6", nickname: "小黑")
+        let snapshot = WidgetSnapshot(status: VehicleStatus(), vehicle: vehicle, updatedAt: Date())
+        XCTAssertEqual(snapshot.modelName, "哈弗第三代H6")
+        XCTAssertEqual(snapshot.vehicleName, "小黑")
+    }
+
     func testSnapshotRoundTripThroughStore() {
         var status = VehicleStatus()
         status.doorsLocked = true

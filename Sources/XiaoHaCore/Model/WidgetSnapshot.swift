@@ -11,6 +11,18 @@ public struct WidgetSnapshot: Codable, Sendable {
     public var range: Double?
     public var acOn: Bool?
     public var updatedAt: Date?
+    /// 车型名（用于小组件标题下的副标题）
+    public var modelName: String?
+    /// 四轮胎压（bar），顺序：左前、右前、左后、右后
+    public var tireFl: Double?
+    public var tireFr: Double?
+    public var tireRl: Double?
+    public var tireRr: Double?
+    /// 四轮是否告警
+    public var tireAlarmFl: Bool?
+    public var tireAlarmFr: Bool?
+    public var tireAlarmRl: Bool?
+    public var tireAlarmRr: Bool?
 
     public init(vehicleName: String = "我的车辆", subtitle: String = "", engineText: String = "--",
                 engineRunning: Bool = false, locked: Bool? = nil, battery: Double? = nil,
@@ -26,10 +38,23 @@ public struct WidgetSnapshot: Codable, Sendable {
         self.updatedAt = updatedAt
     }
 
+    /// 胎压展示值：保留一位小数，缺失显示 "--"。
+    public var tireTexts: [String] {
+        [tireFl, tireFr, tireRl, tireRr].map { value in
+            guard let value, value > 0 else { return "--" }
+            return JavaMath.fixed(value, decimals: 1)
+        }
+    }
+
+    public var tireAlarms: [Bool] {
+        [tireAlarmFl, tireAlarmFr, tireAlarmRl, tireAlarmRr].map { $0 == true }
+    }
+
     public init(status: VehicleStatus?, vehicle: GwmVehicle?, updatedAt: Date?) {
         self.init()
         vehicleName = vehicle?.displayName() ?? "我的车辆"
         subtitle = vehicle?.subtitleWithPlatform(nil) ?? ""
+        modelName = vehicle?.modelName ?? vehicle?.seriesName
         self.updatedAt = updatedAt
         guard let status else { return }
         engineText = status.engineText()
@@ -38,6 +63,15 @@ public struct WidgetSnapshot: Codable, Sendable {
         battery = status.batteryPercent
         range = status.fuelRange
         acOn = status.airConditioner
+        modelName = vehicle?.modelName ?? vehicle?.seriesName
+        tireFl = status.tirePressureFl
+        tireFr = status.tirePressureFr
+        tireRl = status.tirePressureRl
+        tireRr = status.tirePressureRr
+        tireAlarmFl = status.tireAlarmFl
+        tireAlarmFr = status.tireAlarmFr
+        tireAlarmRl = status.tireAlarmRl
+        tireAlarmRr = status.tireAlarmRr
     }
 
     public func encoded() -> Data? {
