@@ -46,11 +46,12 @@ jobs:
           xcodebuild -version
           echo "--- 已安装的 SDK ---"
           xcodebuild -showsdks | sed -n '1,40p' || true
-          # 若 iphoneos SDK 缺失，显式安装当前 Xcode 对应平台
+          # 平台缺失时真正安装：Xcode 15+ 支持 -downloadPlatform
           if ! xcodebuild -showsdks | grep -q "iphoneos"; then
-            echo "iphoneos SDK 缺失，尝试安装 iOS 平台组件"
+            echo "iphoneos SDK 缺失，尝试下载 iOS 平台组件"
             sudo xcodebuild -runFirstLaunch || true
-            xcrun simctl list runtimes >/dev/null 2>&1 || true
+            sudo xcodebuild -downloadPlatform iOS || true
+            xcodebuild -showsdks | sed -n '1,40p' || true
           fi
 
       - name: 安装 XcodeGen
@@ -72,17 +73,24 @@ jobs:
       - name: 编译并归档（不签名）
         run: |
           set -euo pipefail
-          xcodebuild archive \
-            -project XiaoHaCar.xcodeproj \
-            -scheme XiaoHaCar \
-            -configuration Release \
-            -destination "generic/platform=iOS" \
-            -archivePath build/XiaoHaCar.xcarchive \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            ENABLE_USER_SCRIPT_SANDBOXING=NO \
+          COMMON_ARGS=(
+            -project XiaoHaCar.xcodeproj
+            -scheme XiaoHaCar
+            -configuration Release
+            -archivePath build/XiaoHaCar.xcarchive
+            CODE_SIGN_IDENTITY=
+            CODE_SIGNING_REQUIRED=NO
+            CODE_SIGNING_ALLOWED=NO
+            ENABLE_USER_SCRIPT_SANDBOXING=NO
             ONLY_ACTIVE_ARCH=NO
+          )
+          # 优先用 generic destination；若该 Xcode 未装 iOS 平台，退回纯 iphoneos SDK 编译
+          if ! xcodebuild archive "${COMMON_ARGS[@]}" -destination "generic/platform=iOS"; then
+            echo "===== destination 模式失败，改用 -sdk iphoneos 重试 ====="
+            rm -rf build/XiaoHaCar.xcarchive
+            xcodebuild archive "${COMMON_ARGS[@]}" -sdk iphoneos \
+              SUPPORTS_MACCATALYST=NO
+          fi
 
       - name: 离线 ad-hoc 签名
         run: |
