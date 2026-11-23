@@ -147,6 +147,7 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
             self.pollEnabled = snapshot.5
             self.reauthMessage = snapshot.6
             if let vin = self.repository.selectedVin() { self.settings.selectedVin = vin }
+            self.syncWidgetSnapshot()
         }
     }
 
@@ -287,6 +288,21 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
         return controlType + " / T5"
     }
 
+    /// 定位状态说明：让用户/我能直接看出是"未上报"还是"解析失败"。
+    var locationStatusText: String {
+        guard isLoggedIn else { return "登录后显示" }
+        guard let status else { return "车况未同步" }
+        if status.hasCoordinate { return "已获取" }
+        let raw = repository.lastRawStatus ?? ""
+        let hasLatKey = raw.range(of: "lat", options: .caseInsensitive) != nil
+        let hasLonKey = raw.range(of: "lon", options: .caseInsensitive) != nil
+            || raw.range(of: "lng", options: .caseInsensitive) != nil
+        if hasLatKey || hasLonKey {
+            return "报文含坐标字段但未解析成功，请复制原始车况反馈"
+        }
+        return "该车型未上报定位"
+    }
+
     func setTemp(_ newValue: Double) {
         pendingTemp = TempControl.normalize(newValue)
     }
@@ -323,9 +339,50 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
         return lines.joined(separator: "\n")
     }
 
+    /// 点击时立即拉取一次云端原始报文并复制，保证内容是最新的真实数据。
     func copyRawStatusReport() {
-        UIPasteboard.general.string = rawStatusReport()
-        banner = Banner(text: "原始车况已复制，可直接粘贴发送", isError: false)
+        banner = Banner(text: "正在拉取云端车况…", isError: false)
+        Task { [weak self] in
+            guard let self else { return }
+            let result = await self.repository.fetchRawStatusNow()
+            self.onMain {
+                switch result {
+                case let .success(raw):
+                    let text = self.buildReport(raw: raw)
+                    UIPasteboard.general.string = text
+                    self.banner = Banner(text: "原始车况已复制（\(raw.count) 字符）", isError: false)
+                case let .failure(error):
+                    UIPasteboard.general.string = self.buildReport(raw: nil)
+                    self.banner = Banner(text: "拉取失败：" + error.friendlyMessage + "（已复制诊断）",
+                                         isError: true)
+                }
+                self.syncWidgetSnapshot()
+            }
+        }
+    }
+
+    private func buildReport(raw: String?) -> String {
+        var lines: [String] = []
+        lines.append("=== 小哈车控 车况诊断 ===")
+        lines.append("时间: " + ISO8601DateFormatter().string(from: Date()))
+        lines.append("已登录: \(isLoggedIn)")
+        lines.append("平台: \(platformForSelectedVehicle())")
+        lines.append("车辆: \(repository.selectedVin() ?? "-")")
+        lines.append("App Group: \(WidgetStore.diagnostics())")
+        lines.append("")
+        lines.append("=== 解析后定位 ===")
+        if let status {
+            lines.append("hasCoordinate=\(status.hasCoordinate)")
+            lines.append("latitude=\(status.latitude.map { String($0) } ?? "nil")")
+            lines.append("longitude=\(status.longitude.map { String($0) } ?? "nil")")
+            lines.append("positionTime=\(status.positionTime ?? "nil")")
+        } else {
+            lines.append("尚无车况")
+        }
+        lines.append("")
+        lines.append("=== 云端原始报文 ===")
+        lines.append(raw ?? repository.lastRawStatus ?? "（拉取失败或尚未拉取）")
+        return lines.joined(separator: "\n")
     }
 
     func clearAlerts() {

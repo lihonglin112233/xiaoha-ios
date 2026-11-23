@@ -133,8 +133,9 @@ struct ControlView: View {
                     Image(systemName: "map").font(.caption2)
                 }
             } else {
-                Text(env.isLoggedIn ? "该车型未上报定位" : "登录后显示")
+                Text(env.locationStatusText)
                     .font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(2)
                 Spacer()
             }
         }

@@ -263,6 +263,23 @@ public final class GwmRepository: @unchecked Sendable {
         lastRawStatus = json
     }
 
+    /// 立即拉取一次原始车况报文并返回（诊断用，绕过轮询状态）。
+    public func fetchRawStatusNow() async -> Result<String, GwmError> {
+        guard let client else { return .failure(GwmError.auth("请先登录")) }
+        let vin = preferences.selectedVin ?? ""
+        guard !vin.isEmpty else { return .failure(GwmError.auth("请先选择车辆")) }
+        do {
+            let raw = try await client.getStatus(vin)
+            let text = GwmCrypto.encodeDotnetJSON(raw)
+            rememberRawStatus(text)
+            let status = VehicleStatus.parse(raw)
+            applySuccess(status, client)
+            return .success(text)
+        } catch {
+            return .failure(Self.friendly(error))
+        }
+    }
+
     /// 乐观更新当前车况（原实现里小组件下发成功后会先改本地状态再刷新）。
     /// 也用于测试中预置初始车况。
     public func setCurrentStatus(_ status: VehicleStatus?) {
