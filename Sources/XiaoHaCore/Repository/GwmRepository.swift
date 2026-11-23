@@ -4,6 +4,8 @@ import Foundation
 public final class GwmRepository: @unchecked Sendable {
     public static let defaultInterval = 60
     public static let minInterval = 30
+    /// 刷新间隔上限：12 小时（与界面选项一致）。
+    public static let maxInterval = 43200
     static let maxBackoff: TimeInterval = 600
 
     public enum SessionState: String, Sendable {
@@ -247,7 +249,7 @@ public final class GwmRepository: @unchecked Sendable {
     private var pendingHvacStrategy: GwmClient.HvacStrategy = .dedicatedCodes
 
     public func setPollIntervalSeconds(_ seconds: Int) {
-        preferences.pollIntervalSeconds = max(Self.minInterval, min(3600, seconds))
+        preferences.pollIntervalSeconds = max(Self.minInterval, min(Self.maxInterval, seconds))
     }
 
     public func setRemoteEnabled(_ enabled: Bool) {
@@ -287,8 +289,24 @@ public final class GwmRepository: @unchecked Sendable {
         lastStatus = status
     }
 
+    /// 同步清除刷新标志，避免在 async 上下文直接持锁。
+    private func endRefreshFlag() {
+        lock.lock(); defer { lock.unlock() }
+        polling = false
+    }
+
+    /// 手动刷新：加防抖，避免连点导致多个请求并发、状态反复广播。
     public func refreshNow() {
-        Task { [weak self] in await self?.refresh(notifyErrors: true) }
+        lock.lock()
+        let alreadyRefreshing = polling
+        polling = true
+        lock.unlock()
+        guard !alreadyRefreshing else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.refresh(notifyErrors: true)
+            self.endRefreshFlag()
+        }
     }
 
     public func restoreSessionQuietly() async {

@@ -226,7 +226,8 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
     var refreshIntervalSeconds: Int {
         get { settings.pollIntervalSeconds }
         set {
-            settings.pollIntervalSeconds = max(GwmRepository.minInterval, min(3600, newValue))
+            settings.pollIntervalSeconds = max(GwmRepository.minInterval,
+                                                min(GwmRepository.maxInterval, newValue))
             repository.setPollIntervalSeconds(settings.pollIntervalSeconds)
             BackgroundPoller.shared.restartTimer(interval: TimeInterval(settings.pollIntervalSeconds))
         }
