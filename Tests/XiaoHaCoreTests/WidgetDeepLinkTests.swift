@@ -91,23 +91,24 @@ final class WidgetDeepLinkTests: XCTestCase {
         XCTAssertGreaterThan(snapshot.vehicleName.count, 20)
     }
 
-    /// 胎压必须能存进快照并原样读出，供小组件四轮显示。
+    /// 胎压必须能存进快照并原样读出；云端单位是 kPa，按整数显示。
     func testTirePressureSnapshot() {
         var status = VehicleStatus()
-        status.tirePressureFl = 2.4
-        status.tirePressureFr = 2.35
-        status.tirePressureRl = 2.2
-        status.tirePressureRr = 2.5
+        status.tirePressureFl = 213
+        status.tirePressureFr = 215
+        status.tirePressureRl = 225
+        status.tirePressureRr = 221
         status.tireAlarmRl = true
         let snapshot = WidgetSnapshot(status: status, vehicle: nil, updatedAt: Date())
 
-        XCTAssertEqual(snapshot.tireTexts, ["2.4", "2.4", "2.2", "2.5"])
+        // 云端是 kPa：2.4bar 场景实际会是 240 这样的整数，这里验证不做 bar 换算
+        XCTAssertEqual(snapshot.tireTexts, ["213", "215", "225", "221"])
         XCTAssertEqual(snapshot.tireAlarms, [false, false, true, false])
 
         WidgetStore.save(snapshot)
         let loaded = WidgetStore.load()
-        XCTAssertEqual(loaded.tireFl, 2.4)
-        XCTAssertEqual(loaded.tireRl, 2.2)
+        XCTAssertEqual(loaded.tireFl, 213)
+        XCTAssertEqual(loaded.tireRl, 225)
         XCTAssertEqual(loaded.tireAlarmRl, true)
     }
 

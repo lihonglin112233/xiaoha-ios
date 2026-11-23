@@ -38,13 +38,16 @@ public struct WidgetSnapshot: Codable, Sendable {
         self.updatedAt = updatedAt
     }
 
-    /// 胎压展示值：保留一位小数，缺失显示 "--"。
+    /// 胎压展示值。云端单位是 kPa（形如 "273,kPa"），因此按整数显示，不做 bar 换算。
     public var tireTexts: [String] {
         [tireFl, tireFr, tireRl, tireRr].map { value in
             guard let value, value > 0 else { return "--" }
-            return JavaMath.fixed(value, decimals: 1)
+            return String(Int(value.rounded()))
         }
     }
+
+    /// 胎压单位（跟随云端，避免误标 bar）。
+    public static let tireUnit = "kPa"
 
     public var tireAlarms: [Bool] {
         [tireAlarmFl, tireAlarmFr, tireAlarmRl, tireAlarmRr].map { $0 == true }

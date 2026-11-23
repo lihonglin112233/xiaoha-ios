@@ -98,21 +98,25 @@ struct CarWidgetView: View {
         }
     }
 
-    /// 中尺寸：左侧指标，右侧车身（图三布局）
+    /// 中尺寸：左侧指标，右侧车身（图三布局）。
+    /// 车图铺满指标与按钮之间的剩余空间，避免大片空白。
     private var mediumContent: some View {
-        HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .center, spacing: 6) {
+            VStack(alignment: .leading, spacing: 5) {
                 metricRow
                 if let range = snapshot.range {
                     Text("续航 \(Int(range)) km")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.teal)
+                        .lineLimit(1)
                 }
             }
-            .frame(width: 108, alignment: .leading)
-            carDiagram(width: 160, height: 88)
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            .frame(width: 88, alignment: .leading)
+
+            carDiagram(width: 120, height: 74)
+                .frame(maxWidth: .infinity)
         }
+        .frame(maxHeight: .infinity)
     }
 
     /// 大尺寸：指标 + 居中大车身
@@ -174,12 +178,12 @@ struct CarWidgetView: View {
         let texts = snapshot.tireTexts
         let alarms = snapshot.tireAlarms
 
-        let textW = width * 0.21
-        let gap = width * 0.06          // 文字与轮胎之间的间距
-        let tireW = max(5, width * 0.09)
-        let tireH = max(8, height * 0.13)
+        let textW = width * 0.22
+        let gap = width * 0.04          // 文字与轮胎之间的间距
+        let tireW = max(5, width * 0.055)
+        let tireH = max(8, height * 0.12)
         let bodyW = max(16, width - 2 * textW - 2 * gap - 2 * tireW)
-        let wheelY = height * 0.30
+        let wheelY = height * 0.28
 
         return HStack(alignment: .center, spacing: 0) {
             // 左侧胎压（左前 / 左后）
@@ -288,7 +292,7 @@ struct CarWidgetView: View {
                         .minimumScaleFactor(0.7)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, family == .systemLarge ? 8 : 6)
+                .padding(.vertical, family == .systemLarge ? 8 : 5)
                 .background(Color.accentColor.opacity(0.12))
                 .foregroundStyle(Color.accentColor)
                 .clipShape(RoundedRectangle(cornerRadius: 9))
