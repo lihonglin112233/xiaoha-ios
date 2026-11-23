@@ -57,6 +57,31 @@ struct ControlView: View {
                 Text("车辆将立即熄火，空调等附件也会停止工作。")
             }
             .task { env.start() }
+            .confirmationDialog(
+                env.pendingWidgetConfirm == .engineStop ? "确认远程熄火？" : "确认远程启动？",
+                isPresented: Binding(
+                    get: { env.pendingWidgetConfirm != nil },
+                    set: { if !$0 { env.pendingWidgetConfirm = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                if env.pendingWidgetConfirm == .engineStop {
+                    Button("熄火", role: .destructive) {
+                        env.pendingWidgetConfirm = nil
+                        env.perform(.engineStop)
+                    }
+                } else {
+                    Button("启动") {
+                        env.pendingWidgetConfirm = nil
+                        startEngine()
+                    }
+                }
+                Button("取消", role: .cancel) { env.pendingWidgetConfirm = nil }
+            } message: {
+                Text(env.pendingWidgetConfirm == .engineStop
+                     ? "车辆将立即熄火，空调等附件也会停止工作。"
+                     : EngineGuard.canStart(env.status).message + "\n\n发动机将运行 \(env.runMinutes) 分钟。")
+            }
         }
     }
 

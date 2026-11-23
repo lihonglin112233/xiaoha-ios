@@ -25,6 +25,8 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
     @Published var fahrenheit = false
     @Published var runMinutes = VehicleAction.defaultRunMinutes
     @Published private(set) var pollEnabled = false
+    /// 小组件点了需要二次确认的动作（远程启动），由界面弹确认框。
+    @Published var pendingWidgetConfirm: VehicleAction?
 
     struct Banner: Identifiable, Equatable {
         let id = UUID()
@@ -302,6 +304,33 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
             return "报文含坐标字段但未解析成功，请复制原始车况反馈"
         }
         return "该车型未上报定位"
+    }
+
+    /// 小组件深链进入后立即执行（iOS 16 小组件不能直接发指令）。
+    func handleWidgetAction(_ link: WidgetDeepLink) {
+        guard isLoggedIn else {
+            banner = Banner(text: "请先打开 App 登录后再使用小组件按钮", isError: true)
+            return
+        }
+        guard let action = link.vehicleAction else {
+            repository.refreshNow()
+            banner = Banner(text: "正在刷新车况…", isError: false)
+            return
+        }
+        // 远程启动有安全风险：唤起 App 后弹确认，不直接发指令。
+        switch action {
+        case .engineStart, .engineStop:
+            let verdict = action == .engineStart
+                ? EngineGuard.canStart(status)
+                : EngineGuard.canStop(status)
+            guard verdict.allowed else {
+                banner = Banner(text: verdict.message, isError: true)
+                return
+            }
+            pendingWidgetConfirm = action
+        default:
+            perform(action)
+        }
     }
 
     func setTemp(_ newValue: Double) {

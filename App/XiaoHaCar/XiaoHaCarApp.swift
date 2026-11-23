@@ -16,7 +16,16 @@ struct XiaoHaCarApp: App {
                     AlertNotifier.shared.requestAuthorization()
                     env.start()
                 }
+                .onOpenURL { url in
+                    handle(url)
+                }
         }
+    }
+
+    /// 小组件按钮通过深链唤起 App，立即执行对应动作。
+    private func handle(_ url: URL) {
+        guard let link = WidgetDeepLink.parse(url) else { return }
+        env.handleWidgetAction(link)
     }
 }
 

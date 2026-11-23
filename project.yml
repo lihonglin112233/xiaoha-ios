@@ -61,6 +61,10 @@ targets:
         BGTaskSchedulerPermittedIdentifiers:
           - com.xiaoha.car.refresh
         ITSAppUsesNonExemptEncryption: false
+        CFBundleURLTypes:
+          - CFBundleURLName: com.xiaoha.car
+            CFBundleURLSchemes:
+              - xiaohacar
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.xiaoha.car
