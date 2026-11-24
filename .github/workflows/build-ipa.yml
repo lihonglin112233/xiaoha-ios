@@ -1,6 +1,10 @@
 name: build-ipa
 
 # 在 macOS runner 上编译出未签名 .ipa，用于 Sideloadly / AltStore 自签安装。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   push:
     branches: [main]
