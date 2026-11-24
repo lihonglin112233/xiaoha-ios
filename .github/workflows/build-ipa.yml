@@ -26,7 +26,7 @@ jobs:
   build:
     name: 编译 ipa
     needs: test
-    runs-on: macos-15
+    runs-on: macos-14
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -34,25 +34,36 @@ jobs:
       - name: 选择 Xcode 并确保 iOS 平台可用
         run: |
           set -euo pipefail
-          # 优先挑一个确实装了 iOS SDK 的 Xcode 版本
-          for candidate in /Applications/Xcode_16.2.app /Applications/Xcode_16.1.app \
-                           /Applications/Xcode_16.0.app /Applications/Xcode.app; do
-            if [ -d "$candidate" ]; then
-              sudo xcode-select -s "$candidate"
-              echo "selected: $candidate"
+          LIST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tac)
+          echo "candidates:"
+          echo "$LIST"
+          CHOSEN=""
+          for candidate in $LIST; do
+            sudo xcode-select -s "$candidate" || continue
+            echo "== testing $candidate"
+            xcodebuild -version || continue
+            if xcodebuild -showsdks 2>/dev/null | grep -q "iphoneos"; then
+              CHOSEN="$candidate"
+              echo "has iphoneos: $candidate"
+              break
+            fi
+            echo "no iphoneos in $candidate, downloading..."
+            sudo xcodebuild -runFirstLaunch || true
+            sudo xcodebuild -downloadPlatform iOS || true
+            if xcodebuild -showsdks 2>/dev/null | grep -q "iphoneos"; then
+              CHOSEN="$candidate"
+              echo "downloaded iphoneos: $candidate"
               break
             fi
           done
-          xcodebuild -version
-          echo "--- 已安装的 SDK ---"
-          xcodebuild -showsdks | sed -n '1,40p' || true
-          # 平台缺失时真正安装：Xcode 15+ 支持 -downloadPlatform
-          if ! xcodebuild -showsdks | grep -q "iphoneos"; then
-            echo "iphoneos SDK 缺失，尝试下载 iOS 平台组件"
-            sudo xcodebuild -runFirstLaunch || true
-            sudo xcodebuild -downloadPlatform iOS || true
-            xcodebuild -showsdks | sed -n '1,40p' || true
+          if [ -z "$CHOSEN" ]; then
+            echo "::error:: no Xcode with iOS platform, cannot build ipa"
+            xcodebuild -showsdks || true
+            exit 1
           fi
+          echo "SELECTED=$CHOSEN"
+          xcodebuild -version
+          xcodebuild -showsdks | sed -n '1,30p'
 
       - name: 安装 XcodeGen
         run: brew install xcodegen
