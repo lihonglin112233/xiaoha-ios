@@ -653,8 +653,13 @@ public final class GwmClient: @unchecked Sendable {
                     return try await sendCommandInner(vin, controlType, body)
                 }
                 if case let .busy(message) = error {
+                    // -114 表示车端还在执行上一条。原实现会盲目重发，
+                    // 若上一条其实已生效就会造成"点一次下发两次"。
+                    // 这里限制最多重试 2 次，并给出明确提示而不是无限重发。
                     busyAttempts += 1
-                    guard busyAttempts <= busyRetryDelays.count else { throw GwmError.busy(message) }
+                    guard busyAttempts <= min(2, busyRetryDelays.count) else {
+                        throw GwmError.busy(message + "（已重试 " + String(busyAttempts - 1) + " 次仍未完成，请稍后在 App 内确认结果，避免重复下发）")
+                    }
                     let seconds = busyRetryDelays[busyAttempts - 1]
                     if seconds > 0 {
                         try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))

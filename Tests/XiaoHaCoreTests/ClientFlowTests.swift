@@ -38,6 +38,11 @@ final class StubTransport: HTTPTransport, @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         return requests.last { $0.url.contains(path) }
     }
+
+    func requestCount(path: String) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        return requests.filter { $0.url.contains(path) }.count
+    }
 }
 
 func json(_ text: String, status: Int = 200) -> HTTPResponse {
@@ -311,6 +316,28 @@ final class ClientFlowTests: XCTestCase {
         } catch {
             XCTFail("意外错误：\(error)")
         }
+    }
+
+    /// -114 忙碌时不能无限重发，否则会造成"点一次下发两次"。
+    func testBusyRetryIsBounded() async {
+        let transport = StubTransport()
+        transport.on(path: "/tsp/ead") { _ in
+            json("{\"header\":{\"c\":\"-114\",\"m\":\"busy\"}}")
+        }
+        let client = makeLoggedInClient(transport)
+        client.retryDelaysForTesting = [0, 0, 0, 0]
+        do {
+            _ = try await client.sendCommand("LSVAA1234567890", GwmCommand.lock, nil)
+            XCTFail("应当失败")
+        } catch let error as GwmError {
+            guard case let .busy(message) = error else { return XCTFail("应为 busy") }
+            XCTAssertTrue(message.contains("请稍后在 App 内确认结果"), message)
+        } catch {
+            XCTFail("意外错误：\(error)")
+        }
+        // 首次 + 最多 2 次重试 = 3 次请求，绝不能更多
+        let count = transport.requestCount(path: "/tsp/ead")
+        XCTAssertLessThanOrEqual(count, 3, "忙碌重试最多发 3 次，实际 \(count) 次")
     }
 
     // MARK: - 登录

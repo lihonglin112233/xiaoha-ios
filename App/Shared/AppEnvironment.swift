@@ -117,7 +117,12 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
         WidgetRefresh.reload()
     }
 
+    /// 幂等：ControlView 与 App 的 .task 都会调用，重复执行会导致重复初始化/刷新。
+    private var started = false
+
     func start() {
+        guard !started else { return }
+        started = true
         repository.bootstrap()
         onMain { [weak self] in
             guard let self else { return }
@@ -306,10 +311,22 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
         return "该车型未上报定位"
     }
 
-    /// 小组件深链进入后立即执行（iOS 16 小组件不能直接发指令）。
+    /// 深链去重：同一条动作在短时间内只执行一次。
+    /// iOS 在"冷启动 + 首次前台"时可能把同一个 URL 投递两次，
+    /// 之前会导致一次点击下发两条指令。
+    private var lastDeepLink: (link: WidgetDeepLink, at: Date)?
+    private let deepLinkWindow: TimeInterval = 3
+
     /// 小组件按钮入口：冷启动时会话可能还没恢复完，不能直接判定未登录，
     /// 先等待恢复（最多几秒）再执行，否则后台被清掉后按键完全无响应。
     func handleWidgetAction(_ link: WidgetDeepLink) {
+        let now = Date()
+        if let last = lastDeepLink, last.link == link, now.timeIntervalSince(last.at) < deepLinkWindow {
+            // 重复投递，直接忽略，避免重复下发
+            return
+        }
+        lastDeepLink = (link, now)
+
         let hasAccount = repository.hasAccount
         if !isLoggedIn && !hasAccount {
             banner = Banner(text: "请先打开 App 登录后再使用小组件按钮", isError: true)
@@ -319,8 +336,9 @@ final class AppEnvironment: ObservableObject, @unchecked Sendable {
             // 会话恢复中：等一次恢复结果，再继续执行
             banner = Banner(text: "正在恢复登录状态…", isError: false)
             Task { [weak self] in
-                await self?.repository.restoreSessionQuietly()
-                self?.onMain { self?.continueWidgetAction(link) }
+                guard let self else { return }
+                await self.repository.restoreSessionQuietly()
+                self.onMain { self.continueWidgetAction(link) }
             }
             return
         }

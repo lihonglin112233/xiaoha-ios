@@ -50,9 +50,11 @@ struct CarWidgetView: View {
         HStack(alignment: .top, spacing: 6) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(snapshot.vehicleName)
-                    .font(.system(size: family == .systemSmall ? 11 : 13, weight: .semibold))
+                    .font(.system(size: family == .systemSmall ? 10 : 12, weight: .semibold))
                     .lineLimit(1)
-                    .truncationMode(.tail)
+                    .truncationMode(.middle)
+                    .minimumScaleFactor(0.75)
+                    .allowsTightening(true)
                 if let model = snapshot.modelName, !model.isEmpty, model != snapshot.vehicleName {
                     Text(model)
                         .font(.system(size: 9))
@@ -66,8 +68,10 @@ struct CarWidgetView: View {
                     .fill(snapshot.engineRunning ? Color.green : Color.secondary.opacity(0.45))
                     .frame(width: 6, height: 6)
                 Text(snapshot.engineText)
-                    .font(.system(size: 9))
+                    .font(.system(size: 8))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
             }
         }
     }
@@ -113,8 +117,11 @@ struct CarWidgetView: View {
             }
             .frame(width: 88, alignment: .leading)
 
-            carDiagram(width: 120, height: 74)
-                .frame(maxWidth: .infinity)
+            GeometryReader { proxy in
+                carDiagram(width: max(96, proxy.size.width - 4), height: max(52, proxy.size.height - 2))
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+            }
+            .frame(maxWidth: .infinity)
         }
         .frame(maxHeight: .infinity)
     }
@@ -283,16 +290,16 @@ struct CarWidgetView: View {
     private func actionButton(_ link: WidgetDeepLink) -> some View {
         if let url = link.url {
             Link(destination: url) {
-                VStack(spacing: 3) {
+                VStack(spacing: 2) {
                     Image(systemName: link.systemImage)
-                        .font(.system(size: family == .systemLarge ? 15 : 13, weight: .medium))
+                        .font(.system(size: family == .systemLarge ? 14 : 11, weight: .medium))
                     Text(link.title)
-                        .font(.system(size: family == .systemLarge ? 10 : 9))
+                        .font(.system(size: family == .systemLarge ? 10 : 8))
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, family == .systemLarge ? 8 : 5)
+                .padding(.vertical, family == .systemLarge ? 7 : 4)
                 .background(Color.accentColor.opacity(0.12))
                 .foregroundStyle(Color.accentColor)
                 .clipShape(RoundedRectangle(cornerRadius: 9))
